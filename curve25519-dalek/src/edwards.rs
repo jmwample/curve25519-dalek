@@ -106,6 +106,9 @@ use cfg_if::cfg_if;
 
 #[cfg(feature = "digest")]
 use digest::{generic_array::typenum::U64, Digest};
+#[cfg(feature = "digest")]
+use crate::elligator2::map_to_point;
+
 
 #[cfg(feature = "group")]
 use {
@@ -595,9 +598,7 @@ impl EdwardsPoint {
 
         let sign_bit = (res[31] & 0x80) >> 7;
 
-        let fe = FieldElement::from_bytes(&res);
-
-        let M1 = crate::montgomery::elligator_encode(&fe);
+        let M1 = map_to_point(&res);
         let E1_opt = M1.to_edwards(sign_bit);
 
         E1_opt
