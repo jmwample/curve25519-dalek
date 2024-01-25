@@ -250,7 +250,7 @@ impl MontgomeryPoint {
     #[cfg(feature = "elligator2")]
     /// This decodes an elligator2 hidden point to a curve point on Curve25519.
     pub fn from_representative(&self) -> MontgomeryPoint {
-        elligator2::map_to_point(&self.0)
+        MontgomeryPoint(elligator2::map_to_point(&self.0).as_bytes())
     }
 }
 
@@ -625,13 +625,13 @@ mod test {
         let bits_in: [u8; 32] = (&bytes[..]).try_into().expect("Range invariant broken");
 
         let eg = elligator2::map_to_point(&bits_in);
-        assert_eq!(eg.to_bytes(), ELLIGATOR_CORRECT_OUTPUT);
+        assert_eq!(eg.as_bytes(), ELLIGATOR_CORRECT_OUTPUT);
     }
 
     #[test]
     fn montgomery_elligator_zero_zero() {
         let zero = [0u8; 32];
         let eg = elligator2::map_to_point(&zero);
-        assert_eq!(eg.to_bytes(), zero);
+        assert_eq!(eg.as_bytes(), zero);
     }
 }

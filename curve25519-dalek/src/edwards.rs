@@ -598,8 +598,8 @@ impl EdwardsPoint {
 
         let sign_bit = (res[31] & 0x80) >> 7;
 
-        let M1 = map_to_point(&res);
-        let E1_opt = M1.to_edwards(sign_bit);
+        let fe1 = map_to_point(&res);
+        let E1_opt = MontgomeryPoint(fe1.as_bytes()).to_edwards(sign_bit);
 
         E1_opt
             .expect("Montgomery conversion to Edwards point in Elligator failed")

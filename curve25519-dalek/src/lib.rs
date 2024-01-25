@@ -52,6 +52,7 @@ extern crate std;
 
 #[cfg(feature = "digest")]
 pub use digest;
+pub mod h2c;
 
 // Internal macros. Must come first!
 #[macro_use]

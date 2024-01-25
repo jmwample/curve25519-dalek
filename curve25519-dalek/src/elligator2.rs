@@ -58,10 +58,7 @@ pub fn representative_from_privkey(privkey: &[u8; 32]) -> Option<[u8; 32]> {
 /// [elligator paper](https://elligator.cr.yp.to/elligator-20130828.pdf)
 /// [elligator site](https://elligator.org/)
 ///
-pub fn point_to_representative(
-    point: &MontgomeryPoint,
-    v_in_sqrt: bool,
-) -> CtOption<[u8; 32]> {
+pub fn point_to_representative(point: &MontgomeryPoint, v_in_sqrt: bool) -> CtOption<[u8; 32]> {
     let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
 
     // a := point
@@ -139,10 +136,10 @@ pub(crate) fn high_y(d: &FieldElement) -> Choice {
 /// the `V` value will be broken. As noted in [`EdwardsPoint::to_montgomery`],
 /// the sign information about the X coordinate is lost on conversion so we
 /// have to use the edwards point derived from the private key to guarantee the
-/// correct value here. 
+/// correct value here.
 ///
 /// Alternatively you can keep track of the public key and sign bit manually
-/// and construct an EdwardsPoint for which [`v_in_sqrt_pubkey_edwards`] will 
+/// and construct an EdwardsPoint for which [`v_in_sqrt_pubkey_edwards`] will
 /// give you the same result.
 ///
 // As an interface, using the private key should work just fine. This allows
@@ -196,7 +193,7 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
 //
 // TODO Determine how much of the hash-to-group API should be exposed after the CFRG
 //      draft gets into a more polished/accepted state.
-pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
+pub fn map_to_point(r: &[u8; 32]) -> FieldElement {
     let r_0 = FieldElement::from_bytes(r);
     let one = FieldElement::ONE;
     let d_1 = &one + &r_0.square2(); /* 2r^2 */
@@ -210,7 +207,7 @@ pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
     let mut u = &d + &Atemp; /* d, or d+A if nonsquare */
     u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
 
-    MontgomeryPoint(u.as_bytes())
+    u
 }
 
 // ------------------------------------------------------------------------
@@ -581,3 +578,4 @@ mod test {
         ]
     }
 }
+
