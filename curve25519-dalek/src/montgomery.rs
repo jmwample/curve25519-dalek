@@ -61,7 +61,7 @@ use crate::scalar::{clamp_integer, Scalar};
 use crate::traits::Identity;
 
 #[cfg(feature = "elligator2")]
-use crate::elligator2; 
+use crate::elligator2;
 
 use subtle::Choice;
 use subtle::ConditionallySelectable;
@@ -620,6 +620,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "alloc")]
+    #[cfg(feature = "elligator2")]
     fn montgomery_elligator_correct() {
         let bytes: Vec<u8> = (0u8..32u8).collect();
         let bits_in: [u8; 32] = (&bytes[..]).try_into().expect("Range invariant broken");
@@ -629,6 +630,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "elligator2")]
     fn montgomery_elligator_zero_zero() {
         let zero = [0u8; 32];
         let eg = elligator2::map_to_point(&zero);

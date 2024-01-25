@@ -616,7 +616,7 @@ impl FieldElement2625 {
 
             let (_sl, _cy1) = _ul.overflowing_sub(_vl);
             let (_rl, _cy2) = _sl.overflowing_sub(cy);
-            cy = _cy1 as u64 | _cy2 as u64;
+            cy = _cy1 as u32 | _cy2 as u32;
         }
 
         Choice::from((cy != 0_u32) as u8)
