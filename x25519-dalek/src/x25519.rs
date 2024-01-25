@@ -454,28 +454,27 @@ impl AsRef<[u8]> for PublicRepresentative {
 }
 
 #[cfg(feature = "elligator2")]
-impl From<[u8;32]> for PublicRepresentative {
+impl From<[u8; 32]> for PublicRepresentative {
     /// Build a Elligator2 Public key Representative from bytes
-    fn from(r: [u8;32]) -> PublicRepresentative {
+    fn from(r: [u8; 32]) -> PublicRepresentative {
         PublicRepresentative(r)
     }
 }
 
 #[cfg(feature = "elligator2")]
-impl<'a> From<&'a [u8;32]> for PublicRepresentative {
+impl<'a> From<&'a [u8; 32]> for PublicRepresentative {
     /// Build a Elligator2 Public key Representative from bytes by reference
-    fn from(r: &'a [u8;32]) -> PublicRepresentative {
-        PublicRepresentative(r.clone())
+    fn from(r: &'a [u8; 32]) -> PublicRepresentative {
+        PublicRepresentative(*r)
     }
 }
-
 
 #[cfg(feature = "elligator2")]
 impl<'a> From<&'a EphemeralSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`EphemeralSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a EphemeralSecret) -> Option<PublicRepresentative> {
         let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
-        let res: Option<[u8;32]> = repres.into();
+        let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
 }
@@ -486,7 +485,7 @@ impl<'a> From<&'a ReusableSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`ReusableSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a ReusableSecret) -> Option<PublicRepresentative> {
         let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
-        let res: Option<[u8;32]> = repres.into();
+        let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
 }
@@ -497,7 +496,7 @@ impl<'a> From<&'a StaticSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`StaticSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a StaticSecret) -> Option<PublicRepresentative> {
         let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
-        let res: Option<[u8;32]> = repres.into();
+        let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
 }
@@ -510,4 +509,3 @@ impl<'a> From<&'a PublicRepresentative> for PublicKey {
         PublicKey(repres)
     }
 }
-

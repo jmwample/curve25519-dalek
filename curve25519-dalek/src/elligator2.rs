@@ -20,7 +20,7 @@ pub(crate) const DIVIDE_MINUS_P_1_2_BYTES: [u8; 32] = [
 
 /// Gets the public representative for a key pair using the private key
 pub fn representative_from_privkey(privkey: &[u8; 32]) -> Option<[u8; 32]> {
-    let pubkey = EdwardsPoint::mul_base_clamped(privkey.clone()).to_montgomery();
+    let pubkey = EdwardsPoint::mul_base_clamped(*privkey).to_montgomery();
     let v_in_sqrt = v_in_sqrt(privkey);
     point_to_representative(&pubkey, v_in_sqrt.into()).into()
 }
@@ -63,7 +63,7 @@ pub fn point_to_representative(point: &MontgomeryPoint, v_in_sqrt: bool) -> CtOp
 
     // a := point
     let a = &FieldElement::from_bytes(&point.0);
-    let mut a_neg = a.clone();
+    let mut a_neg = *a;
     a_neg.negate();
 
     let is_encodable = is_encodable(a);
@@ -148,7 +148,7 @@ pub(crate) fn high_y(d: &FieldElement) -> Choice {
 // need for anyone with only the public key to be able to generate the
 // representative.
 pub fn v_in_sqrt(key_input: &[u8; 32]) -> Choice {
-    let mut masked_pk = key_input.clone();
+    let mut masked_pk = *key_input;
     masked_pk[0] &= 0xf8;
     masked_pk[31] &= 0x7f;
     masked_pk[31] |= 0x40;
@@ -178,9 +178,7 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
     let v = &(&t0 * &inv1) * &(&pubkey.Z * &sqrt_minus_a_plus_2);
 
     // is   v <= (q-1)/2  ?
-    let c = divide_minus_p_1_2.ct_gt(&v);
-
-    c
+    divide_minus_p_1_2.ct_gt(&v)
 }
 
 // ----------------------------------------------------------------------------
