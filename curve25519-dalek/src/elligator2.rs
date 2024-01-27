@@ -184,6 +184,99 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 
+/*
+const U_FACTOR: [u8;32] = [
+	0x8d, 0xbe, 0xe2, 0x6b, 0xb1, 0xc9, 0x23, 0x76, 0x0e, 0x37, 0xa0, 0xa5, 0xf2, 0xcf, 0x79, 0xa1,
+    0xb1, 0x50, 0x08, 0x84, 0xcd, 0xfe, 0x65, 0xa9, 0xe9, 0x41, 0x7c, 0x60, 0xff, 0xb6, 0xf9, 0x28];
+//     // Reverse
+//     0x28, 0xf9, 0xb6, 0xff, 0x60, 0x7c, 0x41, 0xe9, 0xa9, 0x65, 0xfe, 0xcd, 0x84, 0x08, 0x50, 0xb1,
+//     0xa1, 0x79, 0xcf, 0xf2, 0xa5, 0xa0, 0x37, 0x0e, 0x76, 0x23, 0xc9, 0xb1, 0x6b, 0xe2, 0xbe, 0x8d];
+
+
+const V_FACTOR: [u8;32] = [
+	0x3e, 0x5f, 0xf1, 0xb5, 0xd8, 0xe4, 0x11, 0x3b, 0x87, 0x1b, 0xd0, 0x52, 0xf9, 0xe7, 0xbc, 0xd0,
+    0x58, 0x28, 0x04, 0xc2, 0x66, 0xff, 0xb2, 0xd4, 0xf4, 0x20, 0x3e, 0xb0, 0x7f, 0xdb, 0x7c, 0x54];
+//     // Reverse
+//     0x54, 0x7c, 0xdb, 0x7f, 0xb0, 0x3e, 0x20, 0xf4, 0xd4, 0xb2, 0xff, 0x66, 0xc2, 0x04, 0x28, 0x58,
+//     0xd0, 0xbc, 0xe7, 0xf9, 0x52, 0xd0, 0x1b, 0x87, 0x3b, 0x11, 0xe4, 0xd8, 0xb5, 0xf1, 0x5f, 0x3e];
+
+*/
+
+#[allow(unused, non_snake_case)]
+/// Perform the Elligator2 mapping to a Montgomery point.
+///
+/// See <https://tools.ietf.org/html/draft-irtf-cfrg-hash-to-curve-10#section-6.7.1>
+//
+// TODO Determine how much of the hash-to-group API should be exposed after the CFRG
+//      draft gets into a more polished/accepted state.
+pub fn map_to_point_new(r: &FieldElement) -> (FieldElement, FieldElement) {
+    // let u_factor = FieldElement::from_bytes(&U_FACTOR);
+    // let v_factor = FieldElement::from_bytes(&V_FACTOR);
+    let zero = FieldElement::ZERO;
+    let one = FieldElement::ONE;
+    let mut minus_one = FieldElement::ONE;
+    minus_one.negate();
+
+    // let mut tv1 = r.square2();
+    // // Exceptional case 2u^2 == -1
+    // tv1.conditional_assign(&zero, tv1.ct_eq(&minus_one));
+
+    // println!("{}", hex::encode(r.as_bytes()));
+    // println!("{}", hex::encode(tv1.as_bytes()));
+
+    // let u = &tv1 + &one;
+    // let tv2 = &u.square();
+
+    // // numerator
+    // let tv3 = &MONTGOMERY_A.square() * &tv1;
+    // let tv3 = &(&tv3 - &tv2) * &MONTGOMERY_A;
+
+    // // denominator
+    // let tv1 = &(&u * &tv2) * &tv3;
+    // let (is_square, _) = FieldElement::sqrt_ratio_i(&one, &tv1);
+
+    // let u = FieldElement::conditional_select(&(&r.square() * &u_factor), &one, is_square);
+    // let v = FieldElement::conditional_select(&(r * &v_factor), &one, is_square);
+
+    // println!("{}", hex::encode(u.as_bytes()));
+    // println!("{}\n", hex::encode(v.as_bytes()));
+
+    // let mut v = &(&v * &tv3) * &tv1;
+    // v.conditional_negate(v.is_negative() ^ is_square);
+
+    // let u = &(&u * &MONTGOMERY_A_NEG) * &tv3;
+    // let u = &(&u * &tv2) * &tv1.square();
+
+    // (u, v)
+
+    // // -----------------------------
+    let mut tv1 = r.square2();
+    // Exceptional case 2u^2 == -1
+    tv1.conditional_assign(&zero, tv1.ct_eq(&minus_one));
+
+    let d_1 = &one + &tv1; /* 1 + 2u^2 */
+    let d = &MONTGOMERY_A_NEG * &(d_1.invert()); /* d = -A/(1+2u^2) */
+
+    let inner = &(&d.square() + &(&d * &MONTGOMERY_A)) + &one;
+    let gx1 = &d * &inner; /* gx1 = d^3 + Ad^2 + d */
+    let gx2 = &gx1 * &tv1;
+
+    let eps_is_sq = high_y(&d);
+
+    // complete X
+    /* A_temp = 0, or A if nonsquare*/
+    let Atemp = FieldElement::conditional_select(&MONTGOMERY_A, &zero, eps_is_sq);
+    let mut x = &d + &Atemp; /* d, or d+A if nonsquare */
+    x.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
+
+    // complete Y
+    let y2 = FieldElement::conditional_select(&gx2, &gx1, eps_is_sq);
+    let (_, mut y) = FieldElement::sqrt_ratio_i(&y2, &one);
+    y.conditional_negate(eps_is_sq ^ y.is_negative());
+
+    (x, y)
+}
+
 #[allow(unused, non_snake_case)]
 /// Perform the Elligator2 mapping to a Montgomery point.
 ///
@@ -204,7 +297,6 @@ pub fn map_to_point(r: &[u8; 32]) -> FieldElement {
     let Atemp = FieldElement::conditional_select(&MONTGOMERY_A, &zero, eps_is_sq); /* 0, or A if nonsquare*/
     let mut u = &d + &Atemp; /* d, or d+A if nonsquare */
     u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
-
     u
 }
 

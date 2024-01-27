@@ -506,6 +506,6 @@ impl<'a> From<&'a PublicRepresentative> for PublicKey {
     /// Given an elligator2 [`PublicRepresentative`], compute its corresponding [`PublicKey`].
     fn from(representative: &'a PublicRepresentative) -> PublicKey {
         let repres = curve25519_dalek::elligator2::map_to_point(&representative.0);
-        PublicKey(repres)
+        PublicKey(MontgomeryPoint(repres.as_bytes()))
     }
 }
