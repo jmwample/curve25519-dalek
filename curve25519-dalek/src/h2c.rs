@@ -1,228 +1,308 @@
+/// ------------------------------------------------------------------------
+/// RfC 9380 Tests
+///
+/// Each test vector in this section lists values computed by the
+/// appropriate encoding function, with variable names defined as in
+/// RFC9380 Section 3. For example, for a suite whose encoding type is random
+/// oracle, the test vector gives the value for msg, u, Q0, Q1, and the
+/// output point P.
+///
+///
+/// * encode_to_curve is a nonuniform encoding from byte strings to
+///   points in G.  That is, the distribution of its output is not
+///   uniformly random in G: the set of possible outputs of
+///   encode_to_curve is only a fraction of the points in G, and some
+///   points in this set are more likely to be output than others.
+///   Section 10.4 gives a more precise definition of encode_to_curve's
+///   output distribution.
+///
+///       encode_to_curve(msg)
+///
+///       Input: msg, an arbitrary-length byte string.
+///       Output: P, a point in G.
+///
+///       Steps:
+///       1. u = hash_to_field(msg, 1)
+///       2. Q = map_to_curve(u[0])
+///       3. P = clear_cofactor(Q)
+///       4. return P
+///
+///
+/// * hash_to_curve is a uniform encoding from byte strings to points in
+///   G.  That is, the distribution of its output is statistically close
+///   to uniform in G.
+///
+///   This function is suitable for most applications requiring a random
+///   oracle returning points in G, when instantiated with any of the
+///   map_to_curve functions described in Section 6.  See Section 10.1
+///   for further discussion.
+///
+///       hash_to_curve(msg)
+///
+///       Input: msg, an arbitrary-length byte string.
+///       Output: P, a point in G.
+///
+///       Steps:
+///       1. u = hash_to_field(msg, 2)
+///       2. Q0 = map_to_curve(u[0])
+///       3. Q1 = map_to_curve(u[1])
+///       4. R = Q0 + Q1              # Point addition
+///       5. P = clear_cofactor(R)
+///       6. return P
+/// ------------------------------------------------------------------------
+use crate::{elligator2::map_fe_to_curve, field::FieldElement, scalar::Scalar, MontgomeryPoint, constants::MONTGOMERY_A_NEG, EdwardsPoint};
 
-// ------------------------------------------------------------------------
-// RfC 9380 Tests
-//
-// Each test vector in this section lists values computed by the
-// appropriate encoding function, with variable names defined as in
-// RFC9380 Section 3. For example, for a suite whose encoding type is random
-// oracle, the test vector gives the value for msg, u, Q0, Q1, and the
-// output point P.
-//
-//
-// * encode_to_curve is a nonuniform encoding from byte strings to
-//   points in G.  That is, the distribution of its output is not
-//   uniformly random in G: the set of possible outputs of
-//   encode_to_curve is only a fraction of the points in G, and some
-//   points in this set are more likely to be output than others.
-//   Section 10.4 gives a more precise definition of encode_to_curve's
-//   output distribution.
-//
-//       encode_to_curve(msg)
-//
-//       Input: msg, an arbitrary-length byte string.
-//       Output: P, a point in G.
-//
-//       Steps:
-//       1. u = hash_to_field(msg, 1)
-//       2. Q = map_to_curve(u[0])
-//       3. P = clear_cofactor(Q)
-//       4. return P
-//
-//
-// * hash_to_curve is a uniform encoding from byte strings to points in
-//   G.  That is, the distribution of its output is statistically close
-//   to uniform in G.
-//
-//   This function is suitable for most applications requiring a random
-//   oracle returning points in G, when instantiated with any of the
-//   map_to_curve functions described in Section 6.  See Section 10.1
-//   for further discussion.
-//
-//       hash_to_curve(msg)
-//
-//       Input: msg, an arbitrary-length byte string.
-//       Output: P, a point in G.
-//
-//       Steps:
-//       1. u = hash_to_field(msg, 2)
-//       2. Q0 = map_to_curve(u[0])
-//       3. Q1 = map_to_curve(u[1])
-//       4. R = Q0 + Q1              # Point addition
-//       5. P = clear_cofactor(R)
-//       6. return P
-// ------------------------------------------------------------------------
-#[cfg(feature="digest")]
+
+use sha2::{Digest, Sha512};
+use subtle::{Choice, ConstantTimeEq, ConditionallySelectable};
+
+pub(crate) const H_EFF: Scalar = Scalar {
+    bytes: [
+        8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ],
+};
+
+/// Input:
+///     * out -> reference to a list of FieldElements of length count such
+///     that all resulting Field Elements can be written returned.
+///     (u_0, ..., u_(count - 1)), a list of field elements.
+///
+///     * msg -> message to be processed
+///
+///     * count -> number of output points
+///
+/// Output:
+///     * Choice -> 1 for success, 0 for failure
+///
+//    Steps:
+//    1. len_in_bytes = count * m * L
+//    2. uniform_bytes = expand_message(msg, DST, len_in_bytes)
+//    3. for i in (0, ..., count - 1):
+//    4.   for j in (0, ..., m - 1):
+//    5.     elm_offset = L * (j + i * m)
+//    6.     tv = substr(uniform_bytes, elm_offset, L)
+//    7.     e_j = OS2IP(tv) mod p
+//    8.   u_i = (e_0, ..., e_(m - 1))
+//    9. return (u_0, ..., u_(count - 1))
+fn hash_to_field(out: &mut [FieldElement], msg: impl AsRef<[u8]>, count: usize) -> Choice {
+    let result = count.ct_eq(&out.len());
+
+    let bytes = msg.as_ref();
+    let mut hash = Sha512::new();
+    hash.update(bytes);
+    let h = hash.finalize();
+    let mut res = [0u8; 32];
+    res.copy_from_slice(&h[..32]);
+    out[0] = FieldElement::from_bytes(&res);
+
+    Choice::from(result)
+}
+
+/// Clear the cofactor associated with the point.
+///
+/// The mappings of Section 6 always output a point on the elliptic
+/// curve, i.e., a point in a group of order h * r.
+/// Obtaining a point in G may require a final operation commonly called
+/// "clearing the cofactor," which takes as input any point on the curve.
+///
+/// The clear_cofactor function is parameterized by a scalar h_eff. Specifically,
+///
+///        clear_cofactor(P) := h_eff * P
+///
+/// where * represents scalar multiplication. For Curve25519 variants `h_eff` = 8.
+// and produces as output a point in the prime-order (sub)group G
+///
+fn clear_cofactor(p: &FieldElement) -> FieldElement {
+    let y = MontgomeryPoint(p.as_bytes());
+    FieldElement::from_bytes(&(&y * &H_EFF).0)
+}
+
+// ---
+
+fn encode_to_curve(msg: impl AsRef<[u8]>) -> [FieldElement; 2] {
+    let mut field_points = [FieldElement::from_bytes(&[0_u8; 32]); 1];
+    hash_to_field(&mut field_points, msg, 1);
+
+    let (q_x, q_y) = map_fe_to_curve(&field_points[0]);
+
+    [clear_cofactor(&q_x), clear_cofactor(&q_y)]
+}
+
+fn hash_to_curve(msg: impl AsRef<[u8]>) -> [FieldElement; 2] {
+    let mut field_points = [FieldElement::from_bytes(&[0_u8; 32]); 2];
+    hash_to_field(&mut field_points, msg, 2);
+
+    let (q0_x, q0_y) = map_fe_to_curve(&field_points[0]);
+    let (q1_x, q1_y) = map_fe_to_curve(&field_points[1]);
+
+    let r_x = &q0_x + &q1_x;
+    let r_y = &q0_y + &q1_y;
+
+    [clear_cofactor(&r_x), clear_cofactor(&r_y)]
+}
+
+#[cfg(feature = "digest")]
 #[cfg(test)]
 mod rfc9380 {
-    use crate::{MontgomeryPoint, field::FieldElement};
-    use crate::elligator2::map_to_point_new;
-    use crate::scalar::Scalar;
+    use super::*;
+    // use crate::EdwardsPoint;
 
-    use sha2::{Sha512, Digest};
-    use subtle::{Choice, ConstantTimeEq};
     use hex::FromHex;
 
+    fn new_edwards_point(u: &FieldElement, v: &FieldElement) -> (FieldElement, FieldElement) {
+        // Per RFC 7748: (x, y) = (sqrt(-486664)*u/v, (u-1)/(u+1))
 
-    pub(crate) const H_EFF: Scalar = Scalar{
-            bytes: [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    };
+        let two = &FieldElement::ONE + &FieldElement::ONE;
+        let (_, sqrt_neg_a_plus_two) = FieldElement::sqrt_ratio_i(&(&MONTGOMERY_A_NEG + &two), &FieldElement::ONE);
 
-    /// Input:
-    ///     * out -> reference to a list of FieldElements of length count such
-    ///     that all resulting Field Elements can be written returned.
-    ///     (u_0, ..., u_(count - 1)), a list of field elements.
-    ///
-    ///     * msg -> message to be processed
-    ///
-    ///     * count -> number of output points
-    ///
-    /// Output:
-    ///     * Choice -> 1 for success, 0 for failure
-    ///
-    fn hash_to_field(out: &mut [FieldElement], msg: impl AsRef<[u8]>, count: usize) -> Choice {
-        let result = count.ct_eq(&out.len());
+        let mut x = &(u * &v.invert()) * &sqrt_neg_a_plus_two;
 
-        let bytes = msg.as_ref();
-        let mut hash = Sha512::new();
-        hash.update(bytes);
-        let h = hash.finalize();
-        let mut res = [0u8; 32];
-        res.copy_from_slice(&h[..32]);
+        let u_plus_one = u + &FieldElement::ONE;
+        let u_minus_one = u - &FieldElement::ONE;
 
-        // let sign_bit = (res[31] & 0x80) >> 7;
-        println!("{}", hex::encode(&res));
-        Choice::from(result)
+        let mut y = &u_minus_one * &u_plus_one.invert();
+
+        // This mapping is undefined when t == 0 or s == -1, i.e., when the
+        // denominator of either of the above rational functions is zero.
+        // Implementations MUST detect exceptional cases and return the value
+        // (v, w) = (0, 1), which is the identity point on all twisted Edwards
+        // curves.
+        let result_undefined = v.is_zero() | u_plus_one.is_zero();
+        x.conditional_assign(&FieldElement::ZERO, result_undefined);
+        y.conditional_assign(&FieldElement::ONE, result_undefined);
+
+        // Convert from Edwards (x, y) to extended (x, y, z, t) coordinates.
+        // new_edwards_from_xy(x, y)
+
+        (x, y)
     }
 
+    fn new_edwards_from_xy(x: &FieldElement, y: &FieldElement) -> EdwardsPoint {
+        // Yeah yeah yeah, no where better to put this. :(
+        let z = FieldElement::ONE;
+        let t = x * y;
 
-    /// Clear the cofactor associated with the
-    ///
-    fn clear_cofactor(x: FieldElement, y: FieldElement) -> [[u8;32]; 2] {
-        let x_m = MontgomeryPoint(x.as_bytes());
-        let y_m = MontgomeryPoint(y.as_bytes());
-        [(&x_m * &H_EFF).to_bytes(), (&y_m * &H_EFF).to_bytes()]
+        EdwardsPoint{X:*x, Y:*y, Z:z, T:t}
     }
 
-    // ---
+    fn nu_correctness(testcase: &xmd_sha512_25519_nu_testcase) -> (FieldElement, FieldElement) {
+        // hash to curve for sha512
+        let mut field_points = [FieldElement::from_bytes(&[0_u8; 32]); 1];
+        let ok: bool = hash_to_field(&mut field_points, testcase.msg, 1).into();
+        assert!(ok);
+        assert_eq!(
+            field_points[0].encode_le(),
+            testcase.u_0,
+            "incorrect hash for curve25519 NU - msg: {}",
+            testcase.msg
+        );
 
-    #[allow(unused)]
-    fn encode_to_curve(msg: impl AsRef<[u8]>) -> [[u8;32]; 2] {
-        let mut field_points = [FieldElement::from_bytes(&[0_u8;32]); 1];
-        hash_to_field(&mut field_points, msg, 1);
+        // map point(s) to curve
+        let (q_x, q_y) = map_fe_to_curve(&field_points[0]);
+        assert_eq!(
+            q_x.encode_le(),
+            testcase.Q_x,
+            "incorrect curve point x coord curve25519 NU - msg: {}",
+            testcase.msg
+        );
+        assert_eq!(
+            q_y.encode_le(),
+            testcase.Q_y,
+            "incorrect curve point y coord curve25519 NU - msg: {}",
+            testcase.msg
+        );
 
-        let (q_x, q_y) = map_to_curve(&field_points[0].as_bytes());
+        // clear cofactor for points
+        let p_x = clear_cofactor(&q_x);
+        let p_y = clear_cofactor(&q_y);
 
-        clear_cofactor(q_x, q_y)
+        (p_x, p_y)
     }
 
-    fn hash_to_curve(msg: impl AsRef<[u8]>) -> [[u8;32]; 2] {
-        let mut field_points = [FieldElement::from_bytes(&[0_u8;32]); 2];
-        hash_to_field(&mut field_points, msg, 2);
+    fn ro_correctness(testcase: &xmd_sha512_25519_ro_testcase) -> (FieldElement, FieldElement) {
+        // hash to curve for sha512
+        let mut field_points = [FieldElement::from_bytes(&[0_u8; 32]); 2];
+        let ok: bool = hash_to_field(&mut field_points, testcase.msg, 2).into();
+        assert!(ok);
+        assert_eq!(
+            field_points[0].encode_le(),
+            testcase.u_0,
+            "incorrect hash for curve25519 RO - msg: {}",
+            testcase.msg
+        );
+        assert_eq!(
+            field_points[1].encode_le(),
+            testcase.u_1,
+            "incorrect hash for curve25519 RO - msg: {}",
+            testcase.msg
+        );
 
-        let (q0_x, q0_y) = map_to_curve(&field_points[0].as_bytes());
-        let (q1_x, q1_y) = map_to_curve(&field_points[1].as_bytes());
+        // map point(s) to curve
+        let (q0_x, q0_y) = map_fe_to_curve(&field_points[0]);
+        let (q1_x, q1_y) = map_fe_to_curve(&field_points[1]);
+        assert_eq!(
+            q0_x.encode_le(),
+            testcase.Q0_x,
+            "incorrect curve point 0 x coord curve25519 RO - msg: {}",
+            testcase.msg
+        );
+        assert_eq!(
+            q0_y.encode_le(),
+            testcase.Q0_y,
+            "incorrect curve point 0 y coord curve25519 RO - msg: {}",
+            testcase.msg
+        );
+        assert_eq!(
+            q1_x.encode_le(),
+            testcase.Q1_x,
+            "incorrect curve point 1 x coord curve25519 RO - msg: {}",
+            testcase.msg
+        );
+        assert_eq!(
+            q1_y.encode_le(),
+            testcase.Q1_y,
+            "incorrect curve point 1 y coord curve25519 RO - msg: {}",
+            testcase.msg
+        );
 
-        let r_x = &q0_x + &q1_x;
-        let r_y = &q0_y + &q1_y;
+        // clear cofactor for points
+        let p_x = clear_cofactor(&(&q0_x + &q1_x));
+        let p_y = clear_cofactor(&(&q0_y + &q1_y));
 
-        clear_cofactor(r_x, r_y)
-    }
-
-    /// calculates a point on the elliptic curve E from an element of the finite
-    /// field F over which E is defined. Section 6 describes mappings for a
-    /// range of curve families.
-    ///
-    /// The input u and outputs x and y are elements of the field F.  The
-    /// affine coordinates (x, y) specify a point on an elliptic curve
-    /// defined over F.  Note, however, that the point (x, y) is not a
-    /// uniformly random point.
-    ///
-    /// Input:
-    ///     * u -> an element of field F.
-    ///
-    /// Output:
-    ///     * Q - a point on the elliptic curve E.
-    ///
-    fn map_to_curve(u: &[u8;32]) -> (FieldElement, FieldElement) {
-        map_to_point_new(&FieldElement::from_bytes(&u))
-    }
-
-
-    #[test]
-    fn map_to_curve_test() {
-        for i in 0..CURVE25519_ELL2.len() {
-            let testcase = &CURVE25519_ELL2[i];
-
-            let u = testcase[0].must_from_be();
-            let mut clamped = u.clone();
-            clamped[31] &= 63;
-
-            // map point to curve
-            let (q_x, _) = map_to_curve(&clamped);
-
-            // check resulting point
-            assert_eq!(q_x.encode_be(), testcase[1], "({i}) incorrect x curve25519 ELL2\n");
-        }
-
-        for i in 0..curve25519_XMD_SHA512_ELL2_NU.len() {
-            let testcase = &curve25519_XMD_SHA512_ELL2_NU[i];
-            let u = testcase.u_0.must_from_le();
-
-            // map point to curve
-            let (q_x, q_y) = map_to_curve(&u);
-
-            // check resulting point
-            assert_eq!(q_x.encode_le(), testcase.Q_x, "({i}) incorrect Q0_x curve25519 NU\n{:?}", testcase);
-            assert_eq!(q_y.encode_le(), testcase.Q_y, "({i}) incorrect Q0_y curve25519 NU\n{:?}", testcase);
-        }
-        for i in 0..curve25519_XMD_SHA512_ELL2_RO.len() {
-            let testcase = &curve25519_XMD_SHA512_ELL2_RO[i];
-            let u0 = testcase.u_0.must_from_le();
-            let u1 = testcase.u_1.must_from_le();
-
-            // map points to curve
-            let (q0_x, q0_y) = map_to_curve(&u0);
-            let (q1_x, q1_y) = map_to_curve(&u1);
-
-            // check resulting points
-            assert_eq!(q0_x.encode_le(), testcase.Q0_x, "({i}) incorrect Q0_x curve25519 RO\n{:?}", testcase);
-            assert_eq!(q0_y.encode_le(), testcase.Q0_y, "({i}) incorrect Q0_y curve25519 RO\n{:?}", testcase);
-            assert_eq!(q1_x.encode_le(), testcase.Q1_x, "({i}) incorrect Q1_x curve25519 RO\n{:?}", testcase);
-            assert_eq!(q1_y.encode_le(), testcase.Q1_y, "({i}) incorrect Q1_y curve25519 RO\n{:?}", testcase);
-        }
+        (p_x, p_y)
     }
 
     #[test]
     fn curve25519_ro() {
         for i in 0..curve25519_XMD_SHA512_ELL2_RO.len() {
             let testcase = &curve25519_XMD_SHA512_ELL2_RO[i];
+            let (p_x, p_y) = ro_correctness(testcase);
+            assert_eq!(
+                p_x.encode_le(),
+                testcase.P_x,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
+            assert_eq!(
+                p_y.encode_le(),
+                testcase.P_y,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
 
-            // hash to curve for sha512
-            let mut field_points = [FieldElement::from_bytes(&[0_u8;32]); 2];
-            let ok: bool = hash_to_field(&mut field_points, testcase.msg, 2).into();
-            assert!(ok);
-            assert_eq!(hex::encode(field_points[0].as_bytes()), testcase.u_0, "({i}) incorrect hash for curve25519 RO");
-            assert_eq!(hex::encode(field_points[1].as_bytes()), testcase.u_0, "({i}) incorrect hash for curve25519 RO");
+            // ==========================================
 
-            // let sign_bit = (res[31] & 0x80) >> 7;
-
-            // map point(s) to curve
-            let (q0_x, q0_y) = map_to_point_new(&field_points[0]);
-            let (q1_x, q1_y) = map_to_point_new(&field_points[1]);
-            assert_eq!(hex::encode(q0_x.as_bytes()), testcase.Q0_x, "({i}) incorrect curve point curve25519 RO");
-            assert_eq!(hex::encode(q0_y.as_bytes()), testcase.Q0_y, "({i}) incorrect curve point curve25519 RO");
-            assert_eq!(hex::encode(q1_x.as_bytes()), testcase.Q1_x, "({i}) incorrect curve point curve25519 RO");
-            assert_eq!(hex::encode(q1_y.as_bytes()), testcase.Q1_y, "({i}) incorrect curve point curve25519 RO");
-
-            // clear cofactor for points
-            let p = clear_cofactor(&q0_x + &q1_x, &q0_y + &q1_y);
-            assert_eq!(hex::encode(p[0]), testcase.P_x, "({i}) cofactor cleared incorrectly curve25519 RO");
-            assert_eq!(hex::encode(p[1]), testcase.P_y, "({i}) cofactor cleared incorrectly curve25519 RO");
-
-            // end to end for RO using hash_to_curve
-            let p = hash_to_curve(testcase.msg);
-            assert_eq!(hex::encode(p[0]), testcase.P_x, "({i}) end to end incorrect X curve25519 NU");
-            assert_eq!(hex::encode(p[1]), testcase.P_y, "({i}) end to end incorrect Y curve25519 NU");
+            // end to end for RO using encode_to_curve
+            let p = encode_to_curve(testcase.msg);
+            assert_eq!(
+                p[0].encode_le(),
+                testcase.P_x,
+                "({i}) end to end incorrect X curve25519 NU"
+            );
+            assert_eq!(
+                p[1].encode_le(),
+                testcase.P_y,
+                "({i}) end to end incorrect Y curve25519 NU"
+            );
         }
     }
 
@@ -230,30 +310,32 @@ mod rfc9380 {
     fn curve25519_nu() {
         for i in 0..curve25519_XMD_SHA512_ELL2_NU.len() {
             let testcase = &curve25519_XMD_SHA512_ELL2_NU[i];
+            let (p_x, p_y) = nu_correctness(testcase);
+            assert_eq!(
+                p_x.encode_le(),
+                testcase.P_x,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
+            assert_eq!(
+                p_y.encode_le(),
+                testcase.P_y,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
 
-            // hash to curve for sha512
-            let mut field_points = [FieldElement::from_bytes(&[0_u8;32]); 1];
-            let ok: bool = hash_to_field(&mut field_points, testcase.msg, 1).into();
-            assert!(ok);
-            assert_eq!(hex::encode(field_points[0].as_bytes()), testcase.u_0, "({i}) incorrect hash for curve25519 NU");
+            // ==========================================
 
-            // let sign_bit = (res[31] & 0x80) >> 7;
-
-            // map point(s) to curve
-            let (q0_x, q0_y) = map_to_point_new(&field_points[0]);
-            assert_eq!(hex::encode(q0_x.as_bytes()), testcase.Q_x, "({i}) incorrect curve point curve25519 NU");
-            assert_eq!(hex::encode(q0_y.as_bytes()), testcase.Q_y, "({i}) incorrect curve point curve25519 NU");
-
-            // clear cofactor for points
-            let p0 = clear_cofactor(q0_x, q0_y);
-
-            assert_eq!(hex::encode(p0[0]), testcase.P_x, "({i}) cofactor cleared incorrectly curve25519 NU");
-            assert_eq!(hex::encode(p0[1]), testcase.P_y, "({i}) cofactor cleared incorrectly curve25519 NU");
-
-            // end to end for RO using hash_to_curve
+            // end to end for NU using hash_to_curve
             let p = hash_to_curve(testcase.msg);
-            assert_eq!(hex::encode(p[0]), testcase.P_x, "({i}) end to end incorrect X curve25519 NU");
-            assert_eq!(hex::encode(p[1]), testcase.P_y, "({i}) end to end incorrect Y curve25519 NU");
+            assert_eq!(
+                p[0].encode_le(),
+                testcase.P_x,
+                "({i}) end to end incorrect X curve25519 NU"
+            );
+            assert_eq!(
+                p[1].encode_le(),
+                testcase.P_y,
+                "({i}) end to end incorrect Y curve25519 NU"
+            );
         }
     }
 
@@ -261,17 +343,35 @@ mod rfc9380 {
     fn edwards25519_ro() {
         for i in 0..edwards25519_XMD_SHA512_ELL2_RO.len() {
             let testcase = &edwards25519_XMD_SHA512_ELL2_RO[i];
+            let (p_x, p_y) = ro_correctness(testcase);
 
-            let u0: [u8;32] = hex::decode(testcase.u_0).unwrap().try_into().unwrap();
-            let u1: [u8;32] = hex::decode(testcase.u_1).unwrap().try_into().unwrap();
+            let (e_x, e_y) = new_edwards_point(&p_x, &p_y);
 
-            let (x, y) = map_to_curve(&u0);
-            assert_eq!(hex::encode(x.as_bytes()), testcase.Q0_x, "({i}) ");
-            assert_eq!(hex::encode(y.as_bytes()), testcase.Q0_y, "({i}) ");
+            assert_eq!(
+                e_x.encode_le(),
+                testcase.P_x,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
+            assert_eq!(
+                e_y.encode_le(),
+                testcase.P_y,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
 
-            let (x, y) = map_to_curve(&u1);
-            assert_eq!(hex::encode(x.as_bytes()), testcase.Q1_x, "({i}) ");
-            assert_eq!(hex::encode(y.as_bytes()), testcase.Q1_y, "({i}) ");
+            // ==========================================
+
+            // end to end for RO using encode_to_curve
+            let p = encode_to_curve(testcase.msg);
+            assert_eq!(
+                p[0].encode_le(),
+                testcase.P_x,
+                "({i}) end to end incorrect X curve25519 NU"
+            );
+            assert_eq!(
+                p[1].encode_le(),
+                testcase.P_y,
+                "({i}) end to end incorrect Y curve25519 NU"
+            );
         }
     }
 
@@ -279,73 +379,37 @@ mod rfc9380 {
     fn edwards25519_nu() {
         for i in 0..edwards25519_XMD_SHA512_ELL2_NU.len() {
             let testcase = &edwards25519_XMD_SHA512_ELL2_NU[i];
+            let (p_x, p_y) = nu_correctness(testcase);
 
-            let p: [u8;32] = hex::decode(testcase.P_x).unwrap().try_into().unwrap();
+            let (e_x, e_y) = new_edwards_point(&p_x, &p_y);
 
-            let (x, y) = map_to_curve(&p);
-            assert_eq!(hex::encode(x.as_bytes()), testcase.Q_x, "({i}) ");
-            assert_eq!(hex::encode(y.as_bytes()), testcase.Q_y, "({i}) ");
+            assert_eq!(
+                e_x.encode_le(),
+                testcase.P_x,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
+            assert_eq!(
+                e_y.encode_le(),
+                testcase.P_y,
+                "({i}) cofactor cleared incorrectly curve25519 RO"
+            );
+
+            // ==========================================
+
+            // end to end for NU using hash_to_curve
+            let p = hash_to_curve(testcase.msg);
+            assert_eq!(
+                p[0].encode_le(),
+                testcase.P_x,
+                "({i}) end to end incorrect X curve25519 NU"
+            );
+            assert_eq!(
+                p[1].encode_le(),
+                testcase.P_y,
+                "({i}) end to end incorrect Y curve25519 NU"
+            );
         }
     }
-
-    const CURVE25519_ELL2: [[&'static str;2]; 14] = [
-        [
-            "0000000000000000000000000000000000000000000000000000000000000000",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ],
-        [
-            "0000000000000000000000000000000000000000000000000000000000000040",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ],
-        [
-            "0000000000000000000000000000000000000000000000000000000000000080",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ],
-        [
-            "00000000000000000000000000000000000000000000000000000000000000c0",
-            "0000000000000000000000000000000000000000000000000000000000000000",
-        ],
-        [
-            "673a505e107189ee54ca93310ac42e4545e9e59050aaac6f8b5f64295c8ec02f",
-            "242ae39ef158ed60f20b89396d7d7eef5374aba15dc312a6aea6d1e57cacf85e",
-        ],
-        [
-            "922688fa428d42bc1fa8806998fbc5959ae801817e85a42a45e8ec25a0d7545a",
-            "696f341266c64bcfa7afa834f8c34b2730be11c932e08474d1a22f26ed82410b",
-        ],
-        [
-            "0d3b0eb88b74ed13d5f6a130e03c4ad607817057dc227152827c0506a538bbba",
-            "0b00df174d9fb0b6ee584d2cf05613130bad18875268c38b377e86dfefef177f",
-        ],
-        [
-            "01a3ea5658f4e00622eeacf724e0bd82068992fae66ed2b04a8599be16662ef5",
-            "7ae4c58bc647b5646c9f5ae4c2554ccbf7c6e428e7b242a574a5a9c293c21f7e",
-        ],
-        [
-            "69599ab5a829c3e9515128d368da7354a8b69fcee4e34d0a668b783b6cae550f",
-            "09024abaaef243e3b69366397e8dfc1fdc14a0ecc7cf497cbe4f328839acce69",
-        ],
-        [
-            "9172922f96d2fa41ea0daf961857056f1656ab8406db80eaeae76af58f8c9f50",
-            "beab745a2a4b4e7f1a7335c3ffcdbd85139f3a72b667a01ee3e3ae0e530b3372",
-        ],
-        [
-            "6850a20ac5b6d2fa7af7042ad5be234d3311b9fb303753dd2b610bd566983281",
-            "1287388eb2beeff706edb9cf4fcfdd35757f22541b61528570b86e8915be1530",
-        ],
-        [
-            "84417826c0e80af7cb25a73af1ba87594ff7048a26248b5757e52f2824e068f1",
-            "51acd2e8910e7d28b4993db7e97e2b995005f26736f60dcdde94bdf8cb542251",
-        ],
-        [
-            "b0fbe152849f49034d2fa00ccc7b960fad7b30b6c4f9f2713eb01c147146ad31",
-            "98508bb3590886af3be523b61c3d0ce6490bb8b27029878caec57e4c750f993d",
-        ],
-        [
-            "a0ca9ff75afae65598630b3b93560834c7f4dd29a557aa29c7becd49aeef3753",
-            "3c5fad0516bb8ec53da1c16e910c23f792b971c7e2a0ee57d57c32e3655a646b",
-        ],
-    ];
 
     // J.4.1.  curve25519_XMD:SHA-512_ELL2_RO_
     //
@@ -356,6 +420,17 @@ mod rfc9380 {
     //
     #[allow(non_upper_case_globals)]
     const curve25519_XMD_SHA512_ELL2_RO: [xmd_sha512_25519_ro_testcase; 5] = [
+        xmd_sha512_25519_ro_testcase {
+            msg: RFC9380_TEST_MESSAGES[0],
+            P_x: "2de3780abb67e861289f5749d16d3e217ffa722192d16bbd9d1bfb9d112b98c0",
+            P_y: "3b5dc2a498941a1033d176567d457845637554a2fe7a3507d21abd1c1bd6e878",
+            u_0: "005fe8a7b8fef0a16c105e6cadf5a6740b3365e18692a9c05bfbb4d97f645a6a",
+            u_1: "1347edbec6a2b5d8c02e058819819bee177077c9d10a4ce165aab0fd0252261a",
+            Q0_x: "36b4df0c864c64707cbf6cf36e9ee2c09a6cb93b28313c169be29561bb904f98",
+            Q0_y: "6cd59d664fb58c66c892883cd0eb792e52055284dac3907dd756b45d15c3983d",
+            Q1_x: "3fa114783a505c0b2b2fbeef0102853c0b494e7757f2a089d0daae7ed9a0db2b",
+            Q1_y: "76c0fe7fec932aaafb8eefb42d9cbb32eb931158f469ff3050af15cfdbbeff94",
+        },
         xmd_sha512_25519_ro_testcase {
             msg: RFC9380_TEST_MESSAGES[1],
             P_x: "2b4419f1f2d48f5872de692b0aca72cc7b0a60915dd70bde432e826b6abc526d",
@@ -399,17 +474,6 @@ mod rfc9380 {
             Q0_y: "29e9dc92297231ef211245db9e31767996c5625dfbf92e1c8107ef887365de1e",
             Q1_x: "38920e9b988d1ab7449c0fa9a6058192c0c797bb3d42ac345724341a1aa98745",
             Q1_y: "24dcc1be7c4d591d307e89049fd2ed30aae8911245a9d8554bf6032e5aa40d3d",
-        },
-        xmd_sha512_25519_ro_testcase {
-            msg: RFC9380_TEST_MESSAGES[0],
-            P_x: "2de3780abb67e861289f5749d16d3e217ffa722192d16bbd9d1bfb9d112b98c0",
-            P_y: "3b5dc2a498941a1033d176567d457845637554a2fe7a3507d21abd1c1bd6e878",
-            u_0: "005fe8a7b8fef0a16c105e6cadf5a6740b3365e18692a9c05bfbb4d97f645a6a",
-            u_1: "1347edbec6a2b5d8c02e058819819bee177077c9d10a4ce165aab0fd0252261a",
-            Q0_x: "36b4df0c864c64707cbf6cf36e9ee2c09a6cb93b28313c169be29561bb904f98",
-            Q0_y: "6cd59d664fb58c66c892883cd0eb792e52055284dac3907dd756b45d15c3983d",
-            Q1_x: "3fa114783a505c0b2b2fbeef0102853c0b494e7757f2a089d0daae7ed9a0db2b",
-            Q1_y: "76c0fe7fec932aaafb8eefb42d9cbb32eb931158f469ff3050af15cfdbbeff94",
         },
     ];
 
@@ -586,9 +650,6 @@ mod rfc9380 {
     struct xmd_sha512_25519_ro_testcase {
         msg: &'static str,
 
-        // Output
-        P_x: &'static str,
-        P_y: &'static str,
         u_0: &'static str,
         u_1: &'static str,
 
@@ -596,6 +657,10 @@ mod rfc9380 {
         Q0_y: &'static str,
         Q1_x: &'static str,
         Q1_y: &'static str,
+
+        // Output
+        P_x: &'static str,
+        P_y: &'static str,
     }
 
     #[allow(non_camel_case_types, non_snake_case)]
@@ -603,15 +668,15 @@ mod rfc9380 {
     struct xmd_sha512_25519_nu_testcase {
         msg: &'static str,
 
-        // output
-        P_x: &'static str,
-        P_y: &'static str,
         u_0: &'static str,
 
         Q_x: &'static str,
         Q_y: &'static str,
-    }
 
+        // Output
+        P_x: &'static str,
+        P_y: &'static str,
+    }
 
     const RFC9380_TEST_MESSAGES: [&'static str; 5] = [
         "",
@@ -621,20 +686,19 @@ mod rfc9380 {
         "a512_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ];
 
-
     trait FromByteString {
-        fn must_from_le(&self) -> [u8;32];
-        fn must_from_be(&self) -> [u8;32];
+        fn must_from_le(&self) -> [u8; 32];
+        fn must_from_be(&self) -> [u8; 32];
     }
 
     impl<'a> FromByteString for &'a str {
-        fn must_from_le(&self) -> [u8;32] {
-            let mut u = <[u8;32]>::from_hex(self).unwrap();
+        fn must_from_le(&self) -> [u8; 32] {
+            let mut u = <[u8; 32]>::from_hex(self).unwrap();
             u.reverse();
             u
         }
-        fn must_from_be(&self) -> [u8;32] {
-            <[u8;32]>::from_hex(self).unwrap()
+        fn must_from_be(&self) -> [u8; 32] {
+            <[u8; 32]>::from_hex(self).unwrap()
         }
     }
 
@@ -645,7 +709,7 @@ mod rfc9380 {
 
     impl ToByteString for FieldElement {
         fn encode_le(&self) -> alloc::string::String {
-            let mut  b = self.as_bytes();
+            let mut b = self.as_bytes();
             b.reverse();
             hex::encode(&b)
         }
@@ -655,4 +719,15 @@ mod rfc9380 {
         }
     }
 
+    impl ToByteString for [u8; 32] {
+        fn encode_le(&self) -> alloc::string::String {
+            let mut b = self.clone();
+            b.reverse();
+            hex::encode(&b)
+        }
+
+        fn encode_be(&self) -> alloc::string::String {
+            hex::encode(self)
+        }
+    }
 }
