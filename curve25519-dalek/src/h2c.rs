@@ -143,48 +143,12 @@ fn hash_to_curve(msg: impl AsRef<[u8]>) -> [FieldElement; 2] {
 }
 
 #[cfg(feature = "digest")]
+#[cfg(feature = "alloc")]
 #[cfg(test)]
 mod rfc9380 {
     use super::*;
-    // use crate::EdwardsPoint;
 
     use hex::FromHex;
-
-    fn new_edwards_point(u: &FieldElement, v: &FieldElement) -> (FieldElement, FieldElement) {
-        // Per RFC 7748: (x, y) = (sqrt(-486664)*u/v, (u-1)/(u+1))
-
-        let two = &FieldElement::ONE + &FieldElement::ONE;
-        let (_, sqrt_neg_a_plus_two) = FieldElement::sqrt_ratio_i(&(&MONTGOMERY_A_NEG + &two), &FieldElement::ONE);
-
-        let mut x = &(u * &v.invert()) * &sqrt_neg_a_plus_two;
-
-        let u_plus_one = u + &FieldElement::ONE;
-        let u_minus_one = u - &FieldElement::ONE;
-
-        let mut y = &u_minus_one * &u_plus_one.invert();
-
-        // This mapping is undefined when t == 0 or s == -1, i.e., when the
-        // denominator of either of the above rational functions is zero.
-        // Implementations MUST detect exceptional cases and return the value
-        // (v, w) = (0, 1), which is the identity point on all twisted Edwards
-        // curves.
-        let result_undefined = v.is_zero() | u_plus_one.is_zero();
-        x.conditional_assign(&FieldElement::ZERO, result_undefined);
-        y.conditional_assign(&FieldElement::ONE, result_undefined);
-
-        // Convert from Edwards (x, y) to extended (x, y, z, t) coordinates.
-        // new_edwards_from_xy(x, y)
-
-        (x, y)
-    }
-
-    fn new_edwards_from_xy(x: &FieldElement, y: &FieldElement) -> EdwardsPoint {
-        // Yeah yeah yeah, no where better to put this. :(
-        let z = FieldElement::ONE;
-        let t = x * y;
-
-        EdwardsPoint{X:*x, Y:*y, Z:z, T:t}
-    }
 
     fn nu_correctness(testcase: &xmd_sha512_25519_nu_testcase) -> (FieldElement, FieldElement) {
         // hash to curve for sha512

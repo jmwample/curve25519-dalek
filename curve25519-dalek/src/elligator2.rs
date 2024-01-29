@@ -191,22 +191,22 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
 /// the finite field F over which E is defined. See section 6.7.1 of the
 /// RFC.
 ///
-/// The input u and outputs x and y are elements of the field F.  The
-/// affine coordinates (x, y) specify a point on an elliptic curve
-/// defined over F.  Note, however, that the point (x, y) is not a
+/// The input r and outputs u and v are elements of the field F.  The
+/// affine coordinates (u, v) specify a point on an elliptic curve
+/// defined over F.  Note, however, that the point (u, v) is not a
 /// uniformly random point.
 ///
 /// Input:
-///     * u -> an element of field F.
+///     * r -> an element of field F.
 ///
 /// Output:
-///     * Q - a point on the elliptic curve E.
+///     * Q - a point in `(u,v)` for on the Montgomery elliptic curve.
 ///
 /// See <https://datatracker.ietf.org/doc/rfc9380/>
-pub fn map_to_curve(r: &[u8; 32]) -> (MontgomeryPoint, MontgomeryPoint) {
+pub fn map_to_curve(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let fe = FieldElement::from_bytes(r);
     let (x, y) = map_fe_to_curve(&fe);
-    (MontgomeryPoint(x.as_bytes()), MontgomeryPoint(y.as_bytes()))
+    (x.as_bytes(), y.as_bytes())
 }
 
 pub(crate) fn map_fe_to_curve(r: &FieldElement) -> (FieldElement, FieldElement) {
@@ -243,26 +243,26 @@ pub(crate) fn map_fe_to_curve(r: &FieldElement) -> (FieldElement, FieldElement) 
 }
 
 #[allow(unused, non_snake_case)]
-/// Perform the Elligator2 mapping to a Montgomery point.
+/// Perform the Elligator2 mapping to a [`MontgomeryPoint`].
 ///
-/// See <https://tools.ietf.org/html/draft-irtf-cfrg-hash-to-curve-10#section-6.7.1>
-//
-// TODO Determine how much of the hash-to-group API should be exposed after the CFRG
-//      draft gets into a more polished/accepted state.
-pub fn map_to_point(r: &[u8; 32]) -> FieldElement {
+/// Calculates a point on elliptic curve E (Curve25519) from an element of
+/// the finite field F over which E is defined. See section 6.7.1 of the
+/// RFC.
+///
+/// The input u and output P are elements of the field F. Note, however, that
+/// the output point P is not a uniformly random point.
+///
+/// Input:
+///     * u -> an element of field F.
+///
+/// Output:
+///     * P - a point on the Montgomery elliptic curve.
+///
+/// See <https://datatracker.ietf.org/doc/rfc9380/>
+pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
     let r_0 = FieldElement::from_bytes(r);
-    let one = FieldElement::ONE;
-    let d_1 = &one + &r_0.square2(); /* 2r^2 */
-
-    let d = &MONTGOMERY_A_NEG * &(d_1.invert()); /* A/(1+2r^2) */
-
-    let eps_is_sq = high_y(&d);
-
-    let zero = FieldElement::ZERO;
-    let Atemp = FieldElement::conditional_select(&MONTGOMERY_A, &zero, eps_is_sq); /* 0, or A if nonsquare*/
-    let mut u = &d + &Atemp; /* d, or d+A if nonsquare */
-    u.conditional_negate(!eps_is_sq); /* d, or -d-A if nonsquare */
-    u
+    let (p, _) = map_fe_to_curve(&r_0);
+    MontgomeryPoint(p.as_bytes())
 }
 
 // ------------------------------------------------------------------------
@@ -271,6 +271,7 @@ pub fn map_to_point(r: &[u8; 32]) -> FieldElement {
 
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
+#[cfg(feature = "alloc")]
 mod test {
     use super::*;
 
@@ -640,6 +641,7 @@ mod rfc9380 {
     use super::*;
 
     use hex::FromHex;
+    use std::string::String;
 
     #[test]
     fn map_to_curve_test_go_ed25519_extra() {
@@ -1059,30 +1061,30 @@ mod rfc9380 {
     }
 
     trait ToByteString {
-        fn encode_le(&self) -> alloc::string::String;
-        fn encode_be(&self) -> alloc::string::String;
+        fn encode_le(&self) -> String;
+        fn encode_be(&self) -> String;
     }
 
     impl ToByteString for FieldElement {
-        fn encode_le(&self) -> alloc::string::String {
+        fn encode_le(&self) -> String {
             let mut b = self.as_bytes();
             b.reverse();
             hex::encode(&b)
         }
 
-        fn encode_be(&self) -> alloc::string::String {
+        fn encode_be(&self) -> String {
             hex::encode(self.as_bytes())
         }
     }
 
     impl ToByteString for [u8; 32] {
-        fn encode_le(&self) -> alloc::string::String {
+        fn encode_le(&self) -> String {
             let mut b = self.clone();
             b.reverse();
             hex::encode(&b)
         }
 
-        fn encode_be(&self) -> alloc::string::String {
+        fn encode_be(&self) -> String {
             hex::encode(self)
         }
     }
