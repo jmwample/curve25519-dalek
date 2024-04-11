@@ -473,7 +473,8 @@ impl<'a> From<&'a [u8; 32]> for PublicRepresentative {
 impl<'a> From<&'a EphemeralSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`EphemeralSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a EphemeralSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
+        let tweak = PublicKey::from(secret).as_bytes()[31];
+        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, tweak);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
@@ -484,7 +485,8 @@ impl<'a> From<&'a EphemeralSecret> for Option<PublicRepresentative> {
 impl<'a> From<&'a ReusableSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`ReusableSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a ReusableSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
+        let tweak = PublicKey::from(secret).as_bytes()[31];
+        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, tweak);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
@@ -495,7 +497,8 @@ impl<'a> From<&'a ReusableSecret> for Option<PublicRepresentative> {
 impl<'a> From<&'a StaticSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`StaticSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a StaticSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0);
+        let tweak = PublicKey::from(secret).as_bytes()[31];
+        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, tweak);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }

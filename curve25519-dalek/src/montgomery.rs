@@ -408,6 +408,7 @@ mod test {
     use crate::constants;
 
     #[cfg(feature = "alloc")]
+    #[cfg(feature = "elligator2")]
     use alloc::vec::Vec;
 
     use rand_core::{CryptoRng, RngCore};
