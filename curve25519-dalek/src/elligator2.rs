@@ -17,7 +17,6 @@ pub(crate) const MASK_UNSET_BYTE: u8 = 0x3f;
 /// bitmask for a single byte when setting the high order two bits of a representative
 pub(crate) const MASK_SET_BYTE: u8 = 0xc0;
 
-
 /// (p - 1) / 2 = 2^254 - 10
 pub(crate) const DIVIDE_MINUS_P_1_2_BYTES: [u8; 32] = [
     0xf6, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -243,7 +242,7 @@ pub fn map_to_curve(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut clamped = *r;
     clamped[31] &= MASK_UNSET_BYTE;
     let fe = FieldElement::from_bytes(&clamped);
-    let (x, y) = map_fe_to_curve(&fe);
+    let (x, y) = map_fe_to_montgomery(&fe);
     (x.as_bytes(), y.as_bytes())
 }
 
@@ -267,7 +266,7 @@ pub fn map_to_curve(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 /// See <https://datatracker.ietf.org/doc/rfc9380/>
 pub fn map_to_curve_unbounded(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let fe = FieldElement::from_bytes(r);
-    let (x, y) = map_fe_to_curve(&fe);
+    let (x, y) = map_fe_to_montgomery(&fe);
     (x.as_bytes(), y.as_bytes())
 }
 
@@ -291,7 +290,7 @@ pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
     let mut clamped = *r;
     clamped[31] &= MASK_UNSET_BYTE;
     let r_0 = FieldElement::from_bytes(&clamped);
-    let (p, _) = map_fe_to_curve(&r_0);
+    let (p, _) = map_fe_to_montgomery(&r_0);
     MontgomeryPoint(p.as_bytes())
 }
 
@@ -313,11 +312,13 @@ pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
 /// See <https://datatracker.ietf.org/doc/rfc9380/>
 pub fn map_to_point_unbounded(r: &[u8; 32]) -> MontgomeryPoint {
     let r_0 = FieldElement::from_bytes(r);
-    let (p, _) = map_fe_to_curve(&r_0);
+    let (p, _) = map_fe_to_montgomery(&r_0);
     MontgomeryPoint(p.as_bytes())
 }
 
-pub(crate) fn map_fe_to_curve(r: &FieldElement) -> (FieldElement, FieldElement) {
+fn map_to_curve_parts(
+    r: &FieldElement,
+) -> (FieldElement, FieldElement, FieldElement, FieldElement) {
     let zero = FieldElement::ZERO;
     let one = FieldElement::ONE;
     let mut minus_one = FieldElement::ONE;
@@ -347,7 +348,49 @@ pub(crate) fn map_fe_to_curve(r: &FieldElement) -> (FieldElement, FieldElement) 
     let (_, mut y) = FieldElement::sqrt_ratio_i(&y2, &one);
     y.conditional_negate(eps_is_sq ^ y.is_negative());
 
-    (x, y)
+    (&x * &d_1, d_1, y, one)
+}
+
+pub(crate) fn map_fe_to_montgomery(r: &FieldElement) -> (FieldElement, FieldElement) {
+    let (xmn, xmd, y, _) = map_to_curve_parts(r);
+    (&xmn * &(xmd.invert()), y)
+}
+
+pub(crate) fn map_fe_to_edwards(r: &FieldElement) -> (FieldElement, FieldElement) {
+    // 1.  (xMn, xMd, yMn, yMd) = map_to_curve_elligator2_curve25519(u)
+    let (xmn, xmd, ymn, ymd) = map_to_curve_parts(r);
+    // c1 = sqrt(-486664)
+    // this cannot fail as it computes a constant
+    let c1 = &(&MONTGOMERY_A_NEG - &FieldElement::ONE) - &FieldElement::ONE;
+    let (_, c1) = FieldElement::sqrt_ratio_i(&c1, &FieldElement::ONE);
+
+    // 2.  xn = xMn * yMd
+    // 3.  xn = xn * c1
+    let mut xn = &(&xmn * &ymd) * &c1;
+
+    // 4.  xd = xMd * yMn    # xn / xd = c1 * xM / yM
+    let mut xd = &xmd * &ymn;
+
+    // 5.  yn = xMn - xMd
+    let mut yn = &xmn - &xmd;
+    // 6.  yd = xMn + xMd    # (n / d - 1) / (n / d + 1) = (n - d) / (n + d)
+    let mut yd = &xmn + &xmd;
+
+    // 7. tv1 = xd * yd
+    // 8.   e = tv1 == 0
+    let cond = (&xd * &yd).is_zero();
+
+    // 9.  xn = CMOV(xn, 0, e)
+    // 10. xd = CMOV(xd, 1, e)
+    // 11. yn = CMOV(yn, 1, e)
+    // 12. yd = CMOV(yd, 1, e)
+    xn = FieldElement::conditional_select(&xn, &FieldElement::ZERO, cond);
+    xd = FieldElement::conditional_select(&xd, &FieldElement::ONE, cond);
+    yn = FieldElement::conditional_select(&yn, &FieldElement::ONE, cond);
+    yd = FieldElement::conditional_select(&yd, &FieldElement::ONE, cond);
+
+    // 13. return (xn, xd, yn, yd)
+    (&xn * &(xd.invert()), &yn * &(yd.invert()))
 }
 
 // ------------------------------------------------------------------------
@@ -365,31 +408,6 @@ mod test {
     ////////////////////////////////////////////////////////////
     // Ntor tests                                             //
     ////////////////////////////////////////////////////////////
-
-    #[test]
-    #[cfg(feature = "elligator2")]
-    /// Ensure private keys generate the expected representatives. These tests
-    /// are generated from agl/ed25519 to ensure compatibility.
-    fn repres_from_privkey_agl() {
-        for (i, vector) in ntor_valid_test_vectors().iter().enumerate() {
-            let privkey = <[u8; 32]>::from_hex(vector[0]).expect("failed to decode hex privatekey");
-            let true_repres = vector[2];
-
-            let repres_res = representative_from_privkey(&privkey, 0u8);
-            assert!(
-                Into::<bool>::into(repres_res.is_some()),
-                "failed to get representative when we should have gotten one :("
-            );
-            let mut repres = repres_res.expect("failed to get representative from pubkey");
-
-            repres[31] &= MASK_UNSET_BYTE;
-            assert_eq!(
-                true_repres,
-                hex::encode(repres),
-                "[good case] agl/ed25519 ({i}) bad representative from privkey"
-            );
-        }
-    }
 
     #[test]
     #[cfg(feature = "elligator2")]
@@ -423,10 +441,35 @@ mod test {
 
     #[test]
     #[cfg(feature = "elligator2")]
+    /// Ensure private keys generate the expected representatives. These tests
+    /// are generated from agl/ed25519 to ensure compatibility.
+    fn repres_from_privkey_agl() {
+        for (i, vector) in ntor_valid_test_vectors().iter().enumerate() {
+            let privkey = <[u8; 32]>::from_hex(vector[0]).expect("failed to decode hex privatekey");
+            let true_repres = vector[2];
+
+            let repres_res = representative_from_privkey(&privkey, 0u8);
+            assert!(
+                Into::<bool>::into(repres_res.is_some()),
+                "failed to get representative when we should have gotten one :("
+            );
+            let repres = repres_res.expect("failed to get representative from pubkey");
+
+            assert_eq!(
+                true_repres,
+                hex::encode(repres),
+                "[good case] agl/ed25519 ({i}) bad representative from privkey"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "elligator2")]
     fn pubkey_from_repres() {
         // testcases from kleshni
         for (i, testcase) in decoding_testcases().iter().enumerate() {
-            let repres = <[u8; 32]>::from_hex(testcase.representative).expect("failed to decode hex representative");
+            let repres = <[u8; 32]>::from_hex(testcase.representative)
+                .expect("failed to decode hex representative");
 
             let point = MontgomeryPoint::from_representative(&MontgomeryPoint(repres));
             assert_eq!(
@@ -446,7 +489,8 @@ mod test {
         // testcases from golang agl/ed25519
         for (i, vector) in ntor_valid_test_vectors().iter().enumerate() {
             let true_pubkey = vector[1];
-            let repres = <[u8; 32]>::from_hex(vector[2]).expect("failed to decode hex representative");
+            let repres =
+                <[u8; 32]>::from_hex(vector[2]).expect("failed to decode hex representative");
 
             // ensure that the representative can be reversed to recover the
             // original public key.
@@ -746,6 +790,12 @@ mod test {
                 point: "9cdb525555555555555555555555555555555555555555555555555555555555",
                 non_lsr_point: "9cdb525555555555555555555555555555555555555555555555555555555555",
             },
+            // 0
+            DecodingTestCase {
+                representative: "0000000000000000000000000000000000000000000000000000000000000000",
+                point: "0000000000000000000000000000000000000000000000000000000000000000",
+                non_lsr_point: "0000000000000000000000000000000000000000000000000000000000000000",
+            },
             // These two tests are not least-square-root representations.
 
             // A large representative with false "high_y" property XXX - Failing
@@ -760,12 +810,6 @@ mod test {
                 point: "27e222fec324b0293842a59a63b8201b0f97b1dd599ebcd478a896b7261aff3e",
                 non_lsr_point: "6d3187192afc3bcc05a497928816e3e2336dc539aa7fc296a9ee013f560db843",
             },
-            // 0
-            DecodingTestCase {
-                representative: "0000000000000000000000000000000000000000000000000000000000000000",
-                point: "0000000000000000000000000000000000000000000000000000000000000000",
-                non_lsr_point: "0000000000000000000000000000000000000000000000000000000000000000",
-            },
         ]
     }
 }
@@ -777,6 +821,7 @@ mod rfc9380 {
 
     use hex::FromHex;
     use std::string::String;
+    // use group::GroupEncoding;
 
     #[test]
     fn map_to_curve_test_go_ed25519_extra() {
@@ -786,7 +831,11 @@ mod rfc9380 {
             clamped[31] &= 63;
 
             // map point to curve
-            let (q_x, _) = map_fe_to_curve(&FieldElement::from_bytes(&clamped));
+            // let (xmn, xmd, y, _) = map_to_curve_parts(&FieldElement::from_bytes(&clamped));
+            // println!("{}, {}, {}", hex::encode(xmn.as_bytes()), hex::encode(xmd.as_bytes()), hex::encode(y.as_bytes()));
+            // let q_x =  &xmn * &(xmd.invert());
+
+            let (q_x, _) = map_fe_to_montgomery(&FieldElement::from_bytes(&clamped));
 
             // check resulting point
             assert_eq!(
@@ -803,7 +852,7 @@ mod rfc9380 {
             let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
 
             // map point to curve
-            let (q_x, q_y) = map_fe_to_curve(&u);
+            let (q_x, q_y) = map_fe_to_montgomery(&u);
 
             // check resulting point
             assert_eq!(
@@ -824,8 +873,8 @@ mod rfc9380 {
             let u1 = FieldElement::from_bytes(&testcase.u_1.must_from_le());
 
             // map points to curve
-            let (q0_x, q0_y) = map_fe_to_curve(&u0);
-            let (q1_x, q1_y) = map_fe_to_curve(&u1);
+            let (q0_x, q0_y) = map_fe_to_montgomery(&u0);
+            let (q1_x, q1_y) = map_fe_to_montgomery(&u1);
 
             // check resulting points
             assert_eq!(
@@ -856,59 +905,77 @@ mod rfc9380 {
     }
 
     #[test]
+    #[cfg(feature = "group")]
     fn map_to_curve_test_edwards25519() {
         for (i, testcase) in edwards25519_XMD_SHA512_ELL2_NU.iter().enumerate() {
+            // let testcase = &curve25519_XMD_SHA512_ELL2_RO[i]; //TODO  -> this is a different thing
+            // than we are iterating over now. Probably an error.
+
             // let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
-            let u = &testcase.u_0.must_from_le();
 
             // map point to curve
-            let (q_x, q_y) = map_to_curve(&u);
+            // let point = EdwardsPoint::nonspec_map_to_curve::<sha2::Sha512>(&testcase.u_0.must_from_le());
+
+            let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
+            let (q_x, q_y) = map_fe_to_edwards(&u);
+            // // let sign_bit: u8 = q_y.is_negative().unwrap_u8();
+            // // let sign_bit: u8 = high_y(&q_x).unwrap_u8();
+            // // let sign_bit: u8 = (q_y.as_bytes()[0] & 0x80) >> 7;
+            // let sign_bit: u8 = (u.as_bytes()[0] & 0x80) >> 7;
+            // let m = MontgomeryPoint(q_x.as_bytes());
+            // let e1 = m.to_edwards(sign_bit ^ 0x01)
+            //     .expect("Montgomery conversion to Edwards point in Elligator failed");
+
+            // let (q_x, q_y) = (e1.X, e1.Y);
 
             // check resulting point
             assert_eq!(
                 q_x.encode_le(),
                 testcase.Q_x,
-                "({i}) incorrect Q0_x curve25519 NU\n{:?}",
+                "({i}) incorrect Q0_x edwards25519 NU\n{:?}",
                 testcase
             );
             assert_eq!(
                 q_y.encode_le(),
                 testcase.Q_y,
-                "({i}) incorrect Q0_y curve25519 NU\n{:?}",
+                "({i}) incorrect Q0_y edwards25519 NU\n{:?}",
                 testcase
             );
         }
         for (i, testcase) in edwards25519_XMD_SHA512_ELL2_RO.iter().enumerate() {
+            // let testcase = &curve25519_XMD_SHA512_ELL2_RO[i]; //TODO  -> this is a different thing
+            // than we are iterating over now. Probably an error.
+
             let u0 = FieldElement::from_bytes(&testcase.u_0.must_from_le());
             let u1 = FieldElement::from_bytes(&testcase.u_1.must_from_le());
 
             // map points to curve
-            let (q0_x, q0_y) = map_fe_to_curve(&u0);
-            let (q1_x, q1_y) = map_fe_to_curve(&u1);
+            let (q0_x, q0_y) = map_fe_to_edwards(&u0);
+            let (q1_x, q1_y) = map_fe_to_edwards(&u1);
 
             // check resulting points
             assert_eq!(
                 q0_x.encode_le(),
                 testcase.Q0_x,
-                "({i}) incorrect Q0_x curve25519 RO\n{:?}",
+                "({i}) incorrect Q0_x edwards25519 RO\n{:?}",
                 testcase
             );
             assert_eq!(
                 q0_y.encode_le(),
                 testcase.Q0_y,
-                "({i}) incorrect Q0_y curve25519 RO\n{:?}",
+                "({i}) incorrect Q0_y edwards25519 RO\n{:?}",
                 testcase
             );
             assert_eq!(
                 q1_x.encode_le(),
                 testcase.Q1_x,
-                "({i}) incorrect Q1_x curve25519 RO\n{:?}",
+                "({i}) incorrect Q1_x edwards25519 RO\n{:?}",
                 testcase
             );
             assert_eq!(
                 q1_y.encode_le(),
                 testcase.Q1_y,
-                "({i}) incorrect Q1_y curve25519 RO\n{:?}",
+                "({i}) incorrect Q1_y edwards25519 RO\n{:?}",
                 testcase
             );
         }
@@ -1252,13 +1319,14 @@ mod randomness {
         }
         fn outliers(&self) -> Vec<usize> {
             let mut rng = thread_rng();
-            let binomial_100 = Binomial::new(100, 0.5).expect("failed to build binomial distribution");
+            let binomial_100 =
+                Binomial::new(100, 0.5).expect("failed to build binomial distribution");
             let expected_dist: [u64; 100] = binomial_100
                 .sample_iter(&mut rng)
                 .take(100)
                 .collect::<Vec<u64>>()
                 .try_into()
-                .expect("failed to build example binomial expected distribution"); 
+                .expect("failed to build example binomial expected distribution");
             // this is a high confidence, but we want to avoid this test failing
             // due to statistical variability on repeat runs.
             let confidence = 0.95;
