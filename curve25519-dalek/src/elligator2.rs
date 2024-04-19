@@ -804,7 +804,6 @@ mod rfc9380 {
     }
 
     #[test]
-    #[cfg(feature = "group")]
     fn map_to_curve_test_edwards25519() {
         for (i, testcase) in edwards25519_XMD_SHA512_ELL2_NU.iter().enumerate() {
             let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
