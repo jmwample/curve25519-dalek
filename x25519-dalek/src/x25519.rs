@@ -508,7 +508,7 @@ impl<'a> From<&'a StaticSecret> for Option<PublicRepresentative> {
 impl<'a> From<&'a PublicRepresentative> for PublicKey {
     /// Given an elligator2 [`PublicRepresentative`], compute its corresponding [`PublicKey`].
     fn from(representative: &'a PublicRepresentative) -> PublicKey {
-        let point = curve25519_dalek::elligator2::map_to_point(&representative.0);
+        let point = MontgomeryPoint::map_to_point(&representative.0);
         PublicKey(point)
     }
 }

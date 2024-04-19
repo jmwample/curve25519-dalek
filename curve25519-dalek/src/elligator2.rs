@@ -220,102 +220,6 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-/// Perform the Elligator2 mapping to Curve25519 in accordance with RFC9380.
-///
-/// Calculates a point on elliptic curve E (Curve25519) from an element of
-/// the finite field F over which E is defined. See section 6.7.1 of the
-/// RFC.
-///
-/// The input r and outputs u and v are elements of the field F.  The
-/// affine coordinates (u, v) specify a point on an elliptic curve
-/// defined over F.  Note, however, that the point (u, v) is not a
-/// uniformly random point.
-///
-/// Input:
-///     * r -> an element of field F.
-///
-/// Output:
-///     * Q - a point in `(u,v)` for on the Montgomery elliptic curve.
-///
-/// See <https://datatracker.ietf.org/doc/rfc9380/>
-pub fn map_to_curve(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let mut clamped = *r;
-    clamped[31] &= MASK_UNSET_BYTE;
-    let fe = FieldElement::from_bytes(&clamped);
-    let (x, y) = map_fe_to_montgomery(&fe);
-    (x.as_bytes(), y.as_bytes())
-}
-
-/// Perform the Elligator2 mapping to Curve25519 in accordance with RFC9380.
-///
-/// Calculates a point on elliptic curve E (Curve25519) from an element of
-/// the finite field F over which E is defined. See section 6.7.1 of the
-/// RFC.
-///
-/// The input r and outputs u and v are elements of the field F.  The
-/// affine coordinates (u, v) specify a point on an elliptic curve
-/// defined over F.  Note, however, that the point (u, v) is not a
-/// uniformly random point.
-///
-/// Input:
-///     * r -> an element of field F.
-///
-/// Output:
-///     * Q - a point in `(u,v)` for on the Montgomery elliptic curve.
-///
-/// See <https://datatracker.ietf.org/doc/rfc9380/>
-pub fn map_to_curve_unbounded(r: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let fe = FieldElement::from_bytes(r);
-    let (x, y) = map_fe_to_montgomery(&fe);
-    (x.as_bytes(), y.as_bytes())
-}
-
-/// Perform the Elligator2 mapping to a [`MontgomeryPoint`].
-///
-/// Calculates a point on elliptic curve E (Curve25519) from an element of
-/// the finite field F over which E is defined. See section 6.7.1 of the
-/// RFC.
-///
-/// The input u and output P are elements of the field F. Note, however, that
-/// the output point P is not a uniformly random point.
-///
-/// Input:
-///     * u -> an element of field F.
-///
-/// Output:
-///     * P - a point on the Montgomery elliptic curve.
-///
-/// See <https://datatracker.ietf.org/doc/rfc9380/>
-pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
-    let mut clamped = *r;
-    clamped[31] &= MASK_UNSET_BYTE;
-    let r_0 = FieldElement::from_bytes(&clamped);
-    let (p, _) = map_fe_to_montgomery(&r_0);
-    MontgomeryPoint(p.as_bytes())
-}
-
-/// Perform the Elligator2 mapping to a [`MontgomeryPoint`].
-///
-/// Calculates a point on elliptic curve E (Curve25519) from an element of
-/// the finite field F over which E is defined. See section 6.7.1 of the
-/// RFC.
-///
-/// The input u and output P are elements of the field F. Note, however, that
-/// the output point P is not a uniformly random point.
-///
-/// Input:
-///     * u -> an element of field F.
-///
-/// Output:
-///     * P - a point on the Montgomery elliptic curve.
-///
-/// See <https://datatracker.ietf.org/doc/rfc9380/>
-pub fn map_to_point_unbounded(r: &[u8; 32]) -> MontgomeryPoint {
-    let r_0 = FieldElement::from_bytes(r);
-    let (p, _) = map_fe_to_montgomery(&r_0);
-    MontgomeryPoint(p.as_bytes())
-}
-
 fn map_to_curve_parts(
     r: &FieldElement,
 ) -> (FieldElement, FieldElement, FieldElement, FieldElement) {
@@ -471,14 +375,14 @@ mod test {
             let repres = <[u8; 32]>::from_hex(testcase.representative)
                 .expect("failed to decode hex representative");
 
-            let point = MontgomeryPoint::from_representative(&MontgomeryPoint(repres));
+            let point = MontgomeryPoint::map_to_point(&repres);
             assert_eq!(
                 testcase.point,
                 hex::encode(point.to_bytes()),
                 "[good case] kleshni ({i}) bad representative from point"
             );
 
-            let point_from_unbounded = map_to_point_unbounded(&repres);
+            let point_from_unbounded = MontgomeryPoint::map_to_point_unbounded(&repres);
             assert_eq!(
                 testcase.non_lsr_point,
                 hex::encode(point_from_unbounded.to_bytes()),
@@ -494,7 +398,7 @@ mod test {
 
             // ensure that the representative can be reversed to recover the
             // original public key.
-            let pubkey = MontgomeryPoint::from_representative(&MontgomeryPoint(repres));
+            let pubkey = MontgomeryPoint::map_to_point(&repres);
             assert_eq!(
                 true_pubkey,
                 hex::encode(pubkey.to_bytes()),
@@ -798,13 +702,13 @@ mod test {
             },
             // These two tests are not least-square-root representations.
 
-            // A large representative with false "high_y" property XXX - Failing
+            // A large representative with false "high_y" property
             DecodingTestCase {
                 representative: "179f24730ded2ce3173908ec61964653b8027e383f40346c1c9b4d2bdb1db76c",
                 point: "e6e5355e0482e952cc951f13db26316ab111ae9edb58c45428a984ce7042d349",
                 non_lsr_point: "10745497d35c6ede6ea6b330546a6fcbf15c903a7be28ae69b1ca14e0bf09b60",
             },
-            // A large representative with true "high_y" property XXX - Failing
+            // A large representative with true "high_y" property
             DecodingTestCase {
                 representative: "8a2f286180c3d8630b5f5a3c7cc027a55e0d3ffb3b1b990c5c7bb4c3d1f91b6f",
                 point: "27e222fec324b0293842a59a63b8201b0f97b1dd599ebcd478a896b7261aff3e",
@@ -821,7 +725,6 @@ mod rfc9380 {
 
     use hex::FromHex;
     use std::string::String;
-    // use group::GroupEncoding;
 
     #[test]
     fn map_to_curve_test_go_ed25519_extra() {
@@ -831,10 +734,6 @@ mod rfc9380 {
             clamped[31] &= 63;
 
             // map point to curve
-            // let (xmn, xmd, y, _) = map_to_curve_parts(&FieldElement::from_bytes(&clamped));
-            // println!("{}, {}, {}", hex::encode(xmn.as_bytes()), hex::encode(xmd.as_bytes()), hex::encode(y.as_bytes()));
-            // let q_x =  &xmn * &(xmd.invert());
-
             let (q_x, _) = map_fe_to_montgomery(&FieldElement::from_bytes(&clamped));
 
             // check resulting point
@@ -908,25 +807,8 @@ mod rfc9380 {
     #[cfg(feature = "group")]
     fn map_to_curve_test_edwards25519() {
         for (i, testcase) in edwards25519_XMD_SHA512_ELL2_NU.iter().enumerate() {
-            // let testcase = &curve25519_XMD_SHA512_ELL2_RO[i]; //TODO  -> this is a different thing
-            // than we are iterating over now. Probably an error.
-
-            // let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
-
-            // map point to curve
-            // let point = EdwardsPoint::nonspec_map_to_curve::<sha2::Sha512>(&testcase.u_0.must_from_le());
-
             let u = FieldElement::from_bytes(&testcase.u_0.must_from_le());
             let (q_x, q_y) = map_fe_to_edwards(&u);
-            // // let sign_bit: u8 = q_y.is_negative().unwrap_u8();
-            // // let sign_bit: u8 = high_y(&q_x).unwrap_u8();
-            // // let sign_bit: u8 = (q_y.as_bytes()[0] & 0x80) >> 7;
-            // let sign_bit: u8 = (u.as_bytes()[0] & 0x80) >> 7;
-            // let m = MontgomeryPoint(q_x.as_bytes());
-            // let e1 = m.to_edwards(sign_bit ^ 0x01)
-            //     .expect("Montgomery conversion to Edwards point in Elligator failed");
-
-            // let (q_x, q_y) = (e1.X, e1.Y);
 
             // check resulting point
             assert_eq!(
@@ -943,9 +825,6 @@ mod rfc9380 {
             );
         }
         for (i, testcase) in edwards25519_XMD_SHA512_ELL2_RO.iter().enumerate() {
-            // let testcase = &curve25519_XMD_SHA512_ELL2_RO[i]; //TODO  -> this is a different thing
-            // than we are iterating over now. Probably an error.
-
             let u0 = FieldElement::from_bytes(&testcase.u_0.must_from_le());
             let u1 = FieldElement::from_bytes(&testcase.u_1.must_from_le());
 
@@ -1384,8 +1263,7 @@ mod randomness {
 
             bitcounts.entry(&alice_representative);
 
-            let pub_from_repr =
-                MontgomeryPoint::from_representative(&MontgomeryPoint(alice_representative));
+            let pub_from_repr = MontgomeryPoint::map_to_point(&alice_representative);
             let pub_from_priv = EdwardsPoint::mul_base_clamped(privkey).to_montgomery();
             assert_eq!(
                 hex::encode(pub_from_priv.as_bytes()),
