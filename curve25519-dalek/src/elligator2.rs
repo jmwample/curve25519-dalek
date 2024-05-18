@@ -306,8 +306,10 @@ pub(crate) fn map_fe_to_edwards(r: &FieldElement) -> (FieldElement, FieldElement
 #[cfg(feature = "alloc")]
 mod test {
     use super::*;
+    use crate::Scalar;
 
     use hex::FromHex;
+    use rand::{thread_rng, Rng};
 
     ////////////////////////////////////////////////////////////
     // Ntor tests                                             //
@@ -715,6 +717,74 @@ mod test {
                 non_lsr_point: "6d3187192afc3bcc05a497928816e3e2336dc539aa7fc296a9ee013f560db843",
             },
         ]
+    }
+
+    #[test]
+    #[cfg(feature = "elligator2")]
+    /// Check the first 32 bytes of a server handshake (the server's serialized
+    /// Elligator public key representative) and return a boolean indicating whether
+    /// they represent a public key that is off the prime-order subgroup of
+    /// Curve25519, regardless of whether the representative is interpreted
+    /// according to pre-v0.0.12 conventions or post-v0.0.12 conventions.
+    // We don't know whether we are dealing with a pre-v0.0.12 obfs4proxy (which
+    // uses 255 bits of the representative) or a post-v0.0.12
+    // obfs4proxy (which uses 254 bits of the representative). Try it both ways,
+    // and convervatively return True only if the point is off the subgroup in
+    // both cases.
+    //
+    // When bit 254 is 0, these two interpretations are the same, and the
+    // probability of a random string being off the subgroup is 3/4. When bit 255
+    // is 1, then the two interpretations each have probability 3/4 of
+    // being off the subgroup; they are both off the subgroup with probability
+    // 9/16. Since bit 254 is either 0 or 1 with probability 1/2, the probability
+    // that a random string represents a point off the subgroup is the average of
+    // 3/4 and 9/16, or 21/32.
+    fn subgroup_check() {
+        let order = Scalar::from(2u128 ^ 252 + 27742317777372353535851937790883648493).bytes;
+        let mut count = 0;
+        let iterations = 1000;
+
+        let mut i = 0;
+        while i < iterations {
+            let y_sk = thread_rng().gen::<[u8; 32]>();
+            let y_sk_tweak = thread_rng().gen::<u8>();
+            let mut y_repr_bytes = match representative_from_privkey(&y_sk, y_sk_tweak) {
+                Some(r) => r,
+                None => continue,
+            };
+
+            // Multiply the point by the order of the prime-order subgroup, check if it is the identity.
+            y_repr_bytes[31] &= 0b01111111;
+            let y_repr_255 = MontgomeryPoint::map_to_point(&y_repr_bytes).mul_clamped(order);
+            let off_subgroup_255 = FieldElement::from_bytes(&y_repr_255.0);
+            let os_255: bool = off_subgroup_255.is_zero().into();
+
+            // Multiply the point by the order of the prime-order subgroup, check if it is the identity.
+            y_repr_bytes[31] &= 0b00111111;
+            let y_repr_254 = MontgomeryPoint::map_to_point(&y_repr_bytes).mul_clamped(order);
+            let off_subgroup_254 = FieldElement::from_bytes(&y_repr_254.0);
+            let os_254: bool = off_subgroup_254.is_zero().into();
+
+            if !os_254 & !os_255 {
+                count += 1;
+            }
+            i += 1;
+        }
+        assert_ne!(count, 0);
+        assert_ne!(count, iterations);
+        /*
+        Yr_255 = from_bytes_255(Yrb)
+        Y_255 = elligator_dir_map(Yr_255)[0]
+        # Multiply the point by the order of the prime-order subgroup, check if it
+        # is the identity.
+        off_subgroup_255 = Mt.scalarmult(Y_255, Mt.order).to_num() != 0
+
+        Yr_254 = from_bytes_254(Yrb)
+        Y_254 = elligator_dir_map(Yr_254)[0]
+        off_subgroup_254 = Mt.scalarmult(Y_254, Mt.order).to_num() != 0
+
+        return off_subgroup_255 and off_subgroup_254
+        */
     }
 }
 
