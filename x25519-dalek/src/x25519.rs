@@ -14,7 +14,9 @@
 //! This implements x25519 key exchange as specified by Mike Hamburg
 //! and Adam Langley in [RFC7748](https://tools.ietf.org/html/rfc7748).
 
-use curve25519_dalek::{edwards::EdwardsPoint, montgomery::MontgomeryPoint, traits::IsIdentity};
+use curve25519_elligator2::{
+    edwards::EdwardsPoint, montgomery::MontgomeryPoint, traits::IsIdentity,
+};
 
 use rand_core::CryptoRng;
 use rand_core::RngCore;
@@ -96,7 +98,10 @@ impl EphemeralSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature = "elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         EphemeralSecret(bytes, tweak[0])
     }
 
@@ -161,7 +166,10 @@ impl ReusableSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature = "elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         ReusableSecret(bytes, tweak[0])
     }
 
@@ -224,7 +232,10 @@ impl StaticSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature = "elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         StaticSecret(bytes, tweak[0])
     }
 
@@ -479,7 +490,8 @@ impl<'a> From<&'a [u8; 32]> for PublicRepresentative {
 impl<'a> From<&'a EphemeralSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`EphemeralSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a EphemeralSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, secret.1);
+        let repres =
+            curve25519_elligator2::elligator2::representative_from_privkey(&secret.0, secret.1);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
@@ -490,7 +502,8 @@ impl<'a> From<&'a EphemeralSecret> for Option<PublicRepresentative> {
 impl<'a> From<&'a ReusableSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`ReusableSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a ReusableSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, secret.1);
+        let repres =
+            curve25519_elligator2::elligator2::representative_from_privkey(&secret.0, secret.1);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
@@ -501,7 +514,8 @@ impl<'a> From<&'a ReusableSecret> for Option<PublicRepresentative> {
 impl<'a> From<&'a StaticSecret> for Option<PublicRepresentative> {
     /// Given an x25519 [`StaticSecret`] key, compute its corresponding [`PublicRepresentative`].
     fn from(secret: &'a StaticSecret) -> Option<PublicRepresentative> {
-        let repres = curve25519_dalek::elligator2::representative_from_privkey(&secret.0, secret.1);
+        let repres =
+            curve25519_elligator2::elligator2::representative_from_privkey(&secret.0, secret.1);
         let res: Option<[u8; 32]> = repres;
         Some(PublicRepresentative(res?))
     }
@@ -515,4 +529,3 @@ impl<'a> From<&'a PublicRepresentative> for PublicKey {
         PublicKey(point)
     }
 }
-

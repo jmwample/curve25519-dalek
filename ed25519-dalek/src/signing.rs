@@ -23,7 +23,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::Sha512;
 use subtle::{Choice, ConstantTimeEq};
 
-use curve25519_dalek::{
+use curve25519_elligator2::{
     digest::{generic_array::typenum::U64, Digest},
     edwards::{CompressedEdwardsY, EdwardsPoint},
     scalar::Scalar,

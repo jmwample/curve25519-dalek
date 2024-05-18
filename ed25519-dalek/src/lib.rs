@@ -271,7 +271,7 @@ pub mod hazmat;
 mod hazmat;
 
 #[cfg(feature = "digest")]
-pub use curve25519_dalek::digest::Digest;
+pub use curve25519_elligator2::digest::Digest;
 #[cfg(feature = "digest")]
 pub use sha2::Sha512;
 

@@ -13,13 +13,13 @@ use alloc::vec::Vec;
 
 use core::iter::once;
 
-use curve25519_dalek::constants;
-use curve25519_dalek::edwards::EdwardsPoint;
-use curve25519_dalek::scalar::Scalar;
-use curve25519_dalek::traits::IsIdentity;
-use curve25519_dalek::traits::VartimeMultiscalarMul;
+use curve25519_elligator2::constants;
+use curve25519_elligator2::edwards::EdwardsPoint;
+use curve25519_elligator2::scalar::Scalar;
+use curve25519_elligator2::traits::IsIdentity;
+use curve25519_elligator2::traits::VartimeMultiscalarMul;
 
-pub use curve25519_dalek::digest::Digest;
+pub use curve25519_elligator2::digest::Digest;
 
 use merlin::Transcript;
 

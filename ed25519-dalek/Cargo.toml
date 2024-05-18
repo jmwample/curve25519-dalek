@@ -26,7 +26,7 @@ rustdoc-args = [
 features = ["batch", "digest", "hazmat", "pem", "serde"]
 
 [dependencies]
-curve25519-dalek = { version = "4", path = "../curve25519-dalek", default-features = false, features = ["digest"] }
+curve25519-elligator2 = { version = "4", path = "../curve25519-elligator2", default-features = false, features = ["digest"] }
 ed25519 = { version = ">=2.2, <2.3", default-features = false }
 signature = { version = ">=2.0, <2.3", optional = true, default-features = false }
 sha2 = { version = "0.10", default-features = false }
@@ -39,7 +39,7 @@ serde = { version = "1.0", default-features = false, optional = true }
 zeroize = { version = "1.5", default-features = false, optional = true }
 
 [dev-dependencies]
-curve25519-dalek = { version = "4", path = "../curve25519-dalek", default-features = false, features = ["digest", "rand_core"] }
+curve25519-elligator2 = { version = "4", path = "../curve25519-elligator2", default-features = false, features = ["digest", "rand_core"] }
 x25519-dalek = { version = "2", path = "../x25519-dalek", default-features = false, features = ["static_secrets"] }
 blake2 = "0.10"
 sha3 = "0.10"
@@ -60,19 +60,19 @@ required-features = ["rand_core"]
 
 [features]
 default = ["fast", "std", "zeroize"]
-alloc = ["curve25519-dalek/alloc", "ed25519/alloc", "serde?/alloc", "zeroize/alloc"]
+alloc = ["curve25519-elligator2/alloc", "ed25519/alloc", "serde?/alloc", "zeroize/alloc"]
 std = ["alloc", "ed25519/std", "serde?/std", "sha2/std"]
 
 asm = ["sha2/asm"]
 batch = ["alloc", "merlin", "rand_core"]
-fast = ["curve25519-dalek/precomputed-tables"]
+fast = ["curve25519-elligator2/precomputed-tables"]
 digest = ["signature/digest"]
 # Exposes the hazmat module
 hazmat = []
 # Turns off stricter checking for scalar malleability in signatures
-legacy_compatibility = ["curve25519-dalek/legacy_compatibility"]
+legacy_compatibility = ["curve25519-elligator2/legacy_compatibility"]
 pkcs8 = ["ed25519/pkcs8"]
 pem = ["alloc", "ed25519/pem", "pkcs8"]
 rand_core = ["dep:rand_core"]
 serde = ["dep:serde", "ed25519/serde"]
-zeroize = ["dep:zeroize", "curve25519-dalek/zeroize"]
+zeroize = ["dep:zeroize", "curve25519-elligator2/zeroize"]

@@ -11,8 +11,8 @@
 
 use core::fmt::Debug;
 
-use curve25519_dalek::edwards::CompressedEdwardsY;
-use curve25519_dalek::scalar::Scalar;
+use curve25519_elligator2::edwards::CompressedEdwardsY;
+use curve25519_elligator2::scalar::Scalar;
 
 use crate::constants::*;
 use crate::errors::*;
