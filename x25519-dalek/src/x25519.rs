@@ -96,7 +96,10 @@ impl EphemeralSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature="elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         EphemeralSecret(bytes, tweak[0])
     }
 
@@ -161,7 +164,10 @@ impl ReusableSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature="elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         ReusableSecret(bytes, tweak[0])
     }
 
@@ -224,7 +230,10 @@ impl StaticSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        csprng.fill_bytes(&mut tweak);
+        if cfg!(feature="elligator2") {
+            // read an extra byte for elligator representative randomness
+            csprng.fill_bytes(&mut tweak);
+        }
         StaticSecret(bytes, tweak[0])
     }
 
