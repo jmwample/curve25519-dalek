@@ -213,12 +213,16 @@ fn pubkey_subgroup_check2() {
             }
         }
     }
+    let mut failed = false;
     for (i, count) in counts.iter().enumerate() {
         println!("{} {}", low_order_points[i], count);
-        // if *count == 0 {
-        //     panic!("low-order point {} not covered", low_order_points[i])
-        // }
+        if *count == 0 {
+            failed = true;
+        }
     }
 
+    if failed {
+        panic!("not all low order points were covered")
+    }
 }
 
