@@ -1,10 +1,7 @@
-
-use crate::{
-    MontgomeryPoint, Scalar,
-};
 use super::*;
+use crate::{MontgomeryPoint, Scalar};
 
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 
 // #[test]
 #[cfg(feature = "elligator2")]
@@ -41,7 +38,11 @@ fn subgroup_check() {
             None => continue,
         };
 
-        println!("{} {:02x}", hex::encode(&y_repr_bytes), y_repr_bytes[31] & 0b1100_0000);
+        println!(
+            "{} {:02x}",
+            hex::encode(&y_repr_bytes),
+            y_repr_bytes[31] & 0b1100_0000
+        );
 
         // Multiply the point by the order of the prime-order subgroup, check if it is the identity.
         y_repr_bytes[31] &= 0b0111_1111;
@@ -77,7 +78,6 @@ fn subgroup_check() {
     */
 }
 
-
 #[test]
 #[cfg(feature = "elligator2")]
 /// pubkey_subgroup_check2 tests that Elligator representatives produced by
@@ -108,8 +108,11 @@ fn pubkey_subgroup_check2() {
     // This is the same as scMinusOne in filippo.io/edwards25519.
     // https://github.com/FiloSottile/edwards25519/blob/v1.0.0/scalar.go#L34
 
-    let scalar_order_minus1 = Scalar::from_canonical_bytes(
-        [236_u8, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16]).unwrap();
+    let scalar_order_minus1 = Scalar::from_canonical_bytes([
+        236_u8, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
+    ])
+    .unwrap();
 
     // Returns a new edwards25519.Point that is v multiplied by the subgroup order.
     let scalar_mult_order = |v: &EdwardsPoint| -> EdwardsPoint {
@@ -120,7 +123,7 @@ fn pubkey_subgroup_check2() {
 
     // Generates a new Keypair using, and returns the public key representative
     // along, with its public key as a newly allocated edwards25519.Point.
-    let generate = || -> ([u8;32], EdwardsPoint) {
+    let generate = || -> ([u8; 32], EdwardsPoint) {
         for _ in 0..63 {
             let y_sk = thread_rng().gen::<[u8; 32]>();
             let y_sk_tweak = thread_rng().gen::<u8>();
@@ -133,7 +136,6 @@ fn pubkey_subgroup_check2() {
         }
         panic!("failed ot generate a valid keypair");
     };
-
 
     // These are all the points of low order that may result from
     // multiplying an Elligator-mapped point by L. We will test that all of
@@ -169,8 +171,11 @@ fn pubkey_subgroup_check2() {
         let index = match low_order_points.iter().position(|x| x == &b_str) {
             Some(idx) => idx,
             None => {
-                panic!("map({})*order yielded unexpected point {:}",
-                    hex::encode(repr), b_str);
+                panic!(
+                    "map({})*order yielded unexpected point {:}",
+                    hex::encode(repr),
+                    b_str
+                );
             }
         };
 
@@ -179,7 +184,7 @@ fn pubkey_subgroup_check2() {
             // We just covered a new point for the first time.
             num_covered += 1;
             if num_covered == low_order_points.len() {
-                break
+                break;
             }
         }
     }
@@ -199,11 +204,13 @@ fn pubkey_subgroup_check2() {
 #[test]
 #[cfg(feature = "elligator2")]
 fn pubkey_subgroup_check3() {
-
     // This is the same as scMinusOne in filippo.io/edwards25519.
     // https://github.com/FiloSottile/edwards25519/blob/v1.0.0/scalar.go#L34
-    let scalar_order_minus1 = Scalar::from_canonical_bytes(
-        [236_u8, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16]).unwrap();
+    let scalar_order_minus1 = Scalar::from_canonical_bytes([
+        236_u8, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
+    ])
+    .unwrap();
 
     // Returns a new edwards25519.Point that is v multiplied by the subgroup order.
     let scalar_mult_order = |v: &EdwardsPoint| -> EdwardsPoint {
@@ -214,7 +221,7 @@ fn pubkey_subgroup_check3() {
 
     // Generates a new Keypair using, and returns the public key representative
     // along, with its public key as a newly allocated edwards25519.Point.
-    let generate = || -> ([u8;32], EdwardsPoint) {
+    let generate = || -> ([u8; 32], EdwardsPoint) {
         for _ in 0..63 {
             let y_sk = thread_rng().gen::<[u8; 32]>();
             let y_sk_tweak = thread_rng().gen::<u8>();
@@ -228,7 +235,7 @@ fn pubkey_subgroup_check3() {
                 None => continue,
             };
 
-            assert_eq!(EdwardsPoint::map_to_point(&y_repr_bytes), y_pk);
+            assert_eq!(MontgomeryPoint::map_to_point(&y_repr_bytes), y_pk.to_montgomery());
 
             // let fe = FieldElement::from_bytes(&y_pk.to_montgomery().to_bytes());
             // let y_repr_bytes = match representative_from_pubkey(&fe, y_sk_tweak) {
@@ -240,7 +247,6 @@ fn pubkey_subgroup_check3() {
         }
         panic!("failed to generate a valid keypair");
     };
-
 
     // These are all the points of low order that may result from
     // multiplying an Elligator-mapped point by L. We will test that all of
@@ -276,8 +282,11 @@ fn pubkey_subgroup_check3() {
         let index = match low_order_points.iter().position(|x| x == &b_str) {
             Some(idx) => idx,
             None => {
-                panic!("map({})*order yielded unexpected point {:}",
-                    hex::encode(repr), b_str);
+                panic!(
+                    "map({})*order yielded unexpected point {:}",
+                    hex::encode(repr),
+                    b_str
+                );
             }
         };
 
@@ -286,7 +295,7 @@ fn pubkey_subgroup_check3() {
             // We just covered a new point for the first time.
             num_covered += 1;
             if num_covered == low_order_points.len() {
-                break
+                break;
             }
         }
     }
@@ -302,4 +311,3 @@ fn pubkey_subgroup_check3() {
         panic!("not all low order points were covered")
     }
 }
-

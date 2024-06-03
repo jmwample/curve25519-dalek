@@ -43,19 +43,35 @@ fn repres_from_pubkey_kleshni() {
 fn repres_from_privkey_agl() {
     for (i, vector) in ntor_valid_test_vectors().iter().enumerate() {
         let privkey = <[u8; 32]>::from_hex(vector[0]).expect("failed to decode hex privatekey");
-        let true_repres = vector[2];
+        let true_repres = vector[3];
 
-        let repres_res = representative_from_privkey(&privkey, 0u8);
-        assert!(
-            Into::<bool>::into(repres_res.is_some()),
-            "failed to get representative when we should have gotten one :("
+        let pubkey_clean = EdwardsPoint::mul_base_clamped(privkey)
+            .to_montgomery()
+            .to_bytes();
+        assert_eq!(
+            hex::encode(pubkey_clean),
+            vector[1],
+            "[good case] agl/ed25519 ({i}) incorrect clean pubkey from privkey"
         );
-        let repres = repres_res.expect("failed to get representative from pubkey");
 
+        let pubkey = EdwardsPoint::mul_base_clamped_dirty(privkey);
+        assert_eq!(
+            hex::encode(pubkey.to_montgomery().to_bytes()),
+            vector[2],
+            "[good case] agl/ed25519 ({i}) incorrect pubkey from privkey"
+        );
+
+        let r1 = representative_from_privkey(&privkey, 0u8)
+            .expect("[good case] agl/ed25519 ({i}) failed to get representative from privkey");
+
+        let repres = representative_from_pubkey(&pubkey, 0u8)
+            .expect("[good case] agl/ed25519 ({i}) failed to get representative from pubkey");
+
+        assert_eq!(hex::encode(r1), hex::encode(repres));
         assert_eq!(
             true_repres,
             hex::encode(repres),
-            "[good case] agl/ed25519 ({i}) bad representative from privkey"
+            "[good case] agl/ed25519 ({i}) incorrect representative from privkey"
         );
     }
 }
@@ -85,8 +101,8 @@ fn pubkey_from_repres() {
 
     // testcases from golang agl/ed25519
     for (i, vector) in ntor_valid_test_vectors().iter().enumerate() {
-        let true_pubkey = vector[1];
-        let repres = <[u8; 32]>::from_hex(vector[2]).expect("failed to decode hex representative");
+        let true_pubkey = vector[2];
+        let repres = <[u8; 32]>::from_hex(vector[3]).expect("failed to decode hex representative");
 
         // ensure that the representative can be reversed to recover the
         // original public key.
@@ -121,116 +137,143 @@ fn non_representable_points() {
 /// library. Each set of three strings is
 ///
 ///   1) the generated private key scalar
-///   2) the associated public key point
-///   3) the successfully created representative
+///   2) the associated public key point when using normal mul_base_clamped
+///   2) the associated public key point w/ cofactor creates using mul_base_clamped_dirty
+///   3) the successfully created representative from the dirty publicKey
 ///
 /// All of these are valid keypairs and our public key to
 /// representative implementation (and repres-to-pubkey) should match and
 /// handle these cases.
 ///
-fn ntor_valid_test_vectors() -> [[&'static str; 3]; 20] {
+fn ntor_valid_test_vectors() -> [[&'static str; 4]; 21] {
     [
         [
-            "eec0c0e43a2f693557dac4938c9a0f44be8bf7999399f26a24e5eab3267517c8",
-            "309d1f477c62df666f47b87930d1883c072d007a169c03d1c231efe2e51cae1f",
-            "bfd7e6dc33b735403cf6c7235513463843db8e1d2c16e62f0d5cacc8a3817515",
+            "b531f4243aa4a013f0f87a2eaaec47807844a2f375d40b774e824d37a196b2b6",
+            "aa2d8f1c47f717d96edbf503ff0d9fa782849c486ad8a7c15b2bf4a793902c35",
+            "04a47c7903661acf03cd71e5400c8b96650bb3620d2ae91b674713ca5f2ac673",
+            "f30130eb1c192cda48a503932c8751232fd784ab7792acba499807e78084a909",
         ],
         [
-            "d27f87a4850f85ef5211094eb417bc8fb9441dd8eedba8def6fd040da93fdf94",
-            "bb6fe9e93c929e104a6b9f956c5de1fdc977899a781d50e76dd8f8852f19e635",
-            "420c98e6ac9cabaccf54e02034916df64a45ad1e7799b5d2ab0403073c6f6a21",
+            "d63f245d00c57683e8f3f7174b2601aa89319d39823e42aa388fb4f349b8df16",
+            "97ed90e92c02c5a488d4d9589174867d0d640c460caf4c61833f6c6cb5f5f874",
+            "3741b60e375affc17d0dba931bb0f5f4540c31c67a979c3399596103283dd27d",
+            "3a50a823f482a7af1ac898446850dd643b9a68b530df4cebe7d9f108ebe8933b",
         ],
         [
-            "54b0d4e7110fb3a6ca5424fa7ffdc7cc599f9280df9759d1eb5d04186a4e82dd",
-            "f305e32fbd38dd1e6b04ba32620c6b8db121ed3216f7118875580bd454eb077d",
-            "a2b1a54463ad048ea9780fe2f92e0517636d2cd537d77a18cb6be03f1f991c04",
+            "2b6b4888ec2d23748f708627c1a9260b0f10dd2fbc941e44cd578d69760d9873",
+            "79a9d72800606a520b580bdba40882fa78f13f61a4a402ef615cf01ef5875450",
+            "d8db37c0fafe81757adcf4f580daff6f68b200a4a38965a4a71ced905e67ee26",
+            "ed3b270440c2c9d6630bd2b92fd07ede4b8ac3881a286bc9d5f225e35e1d5a31",
         ],
         [
-            "9ce200c8a0c3e617c7c5605dc60d1ce67e30a608c492143d643880f91594a6dd",
-            "56a2e451811eb62c78090c3d076f4b179b2e9baa4d80188a3db319301031191b",
-            "c16f22f4899aae477d37c250164d10c9c898a820bf790b1532c3bc379b8d733e",
+            "9228b2e3a95462b6d9f32cc326c3c55107972e9cb426301d33861bec15049b65",
+            "995ac596a4c4f6da1a7ae3cc5ef9dcfb74443717a68dc03972882c9ba7db1823",
+            "9d8ef0820c3ed0b0c7d29e178eaf31431ca4ee1e97cdab08ea6c85946a3e5e6b",
+            "b918077e9e1283c0cc44055a28b97ea131e8517983ed033d60e99b818f55fe00",
         ],
         [
-            "98f09f9dedc813654e4ba28c9cd545587b20c6133603f13d8d4da2b67b4eab8c",
-            "210d599d6b8d1659e4a6eb98fdebd1a7024b22ba148af2a603ab807735af6a57",
-            "fc4ad471aff8243195ab6778054b0b243f93b4d31d5ac3a5bda9354dc3def735",
+            "21af4b82c709c6dbf0a1aa28b7a045ea6a20448ec36c9f5f6eadf60c9a71ee66",
+            "f8ac0dd56d7c9f7d681a8fec38675a39e37e2b9780995ce6cdc1f4da25356860",
+            "41b49d99d7490aae2c774893d2f24147c353f4179ef318c1954899eb93ba7316",
+            "e1d2992fce97a72d40483f940aa1156d34eea4e5789336155d718f0d74eb9e27",
         ],
         [
-            "fa850ae6663a8c7b84c71c6391e0b02df2d6adbc30a03b961c4b496b9979cf9d",
-            "7fc7a4a8ae33cd045b064d1618689a7e16c87ce611f8f519433b10134dc57b04",
-            "062d292892515a6a9e71e1430cc593e5cf90e4c18d7c0c0eaae7a07768e6f713",
+            "465fd0ac29e17ecadf922676a99a40e59ef20ed7d964663fce6d09cfe247599e",
+            "5246cdd46625f43e590699a8c0f8740af173190036875c163fc9b430c72b301e",
+            "9b85e75bfe129adf7e28d2ac1a8a2a186259c91e9afe5b60497f59fe48a61363",
+            "cfa4592dc98b4625c70bcc5f5b39611043436e4d8818e977ae479e2321b4e731",
         ],
         [
-            "c19e91e47db473ff36714a8490665eaf6e57d228ef116e7771febce437c9e4ef",
-            "5ca47c5affeaeac3d67ef6564f0faa0bd575857eb4e315b57458959b0034f75c",
-            "f22ceea9e0e3826a308fe60df0edf4b82177e3704750f7af6e41aa5c5d806f16",
+            "f0bfc68ccc5cde3aac026b8668055c06bb286950197cf8df5b8546c2a55f8676",
+            "51f046dc5d42d9a73fc12d9b3720723915f58b8b617584ae469bd081118c784d",
+            "51f046dc5d42d9a73fc12d9b3720723915f58b8b617584ae469bd081118c784d",
+            "0cb6b5eb789ec03c3561b6574554f1a3e9ceb265cf92e8f1edf03e445641e13a",
         ],
         [
-            "012fb2f110c7da5d56bb86e28e23dff1d860bb6ed11e145be9344ba756dd4e6e",
-            "badb58d30c1a8b6bbc0ee97f627272aa1c5625a1cadb7bf75fa274f76c081964",
-            "62cf0d3d7c67715a7cc982c9186ccd4d151b64b2cef862433a963b7b2c13f033",
+            "3d4269b3aa052fa291db18183ebd9e05d0230faa7f474eaa28c7cebb191b552c",
+            "22b0fa046129a0b3a1ddaacb7b62edd952d239aec38ea8c89bf00e15fe859547",
+            "af0c7b6703225e5ff0260e2cec7c79ded10506c76f1fd86b6134b0b41481f05f",
+            "932f7c251dfc76ca8fc893068ac7f76c82f311830bbc39a7d69ab1dc75adb419",
         ],
         [
-            "fc9fec244ec6064f1060aabad079d04d1bb180239b07d4d02383ecbb05a7095e",
-            "54fe5cc959be48e5a0251026ac4cd0f5a424b8f5c157a7c59857d2ab11521e4c",
-            "0326b2e14412ef42fdd0144f96f6b47a5e0954aa110ca7ba124d1aca82269e1f",
+            "2507de9b7116c8e38b8d9d4a9787c7ad58a5ac82c7cafca8f1f20ed13d41c07e",
+            "a2a75aa84a1e31a332a49ef20767c0b4b7f2fc81784b720a6f39a666b3d28e53",
+            "769d48797268911011619509485d5f68649bc56c208057de42188b7f4b6e4a40",
+            "4b0946387189f8eb0d51ac2ca1156297cc69f3e7d681da2353af7b61055f6c04",
         ],
         [
-            "1cb297f54fd1b320995f885591abdd5b84ff35f55ed22f85475a00c0c97b648a",
-            "2b0472ba2ffd8af768c2b6dab2b6db21c0ca153537d4b3c638a7cf7708c99e2d",
-            "08bba17691f09c899bba92f8950dec551065249f77e59d46bf113c56fc54a20f",
+            "ab675f987fa1ff564d9532b94103d382424c804e16f33278d5daf8460cafc12f",
+            "d186d70dd4a861fe0b13bf5bdd43a28ffd5457128d47aee934b8efd4fa163972",
+            "f3875d1c9118a39467f774837d5b73f26245add28adface6c3831d0b16311600",
+            "55dc20e8bdfc4d13a6a3f1c49859f35248d1bda1d0db26efc02ccf407ec5670c",
         ],
         [
-            "4871c2e7ada1911544713cbf15e0553d4972cc9867a4e67a667643b8e7a77d30",
-            "d73258438f51a0f603180aa349e3276fd623bcce61ff9d2dbb9fd9a9aaf53e40",
-            "a5ad91e362963312d95659b2e97bfcfddca573841f864cf8a8e0e075a72e4d1c",
+            "7f74e1ee4b024dfa1d0922f3b848891ca0bda69760a72354ee38c9a340293511",
+            "1616f968954f044a8033d0639ef9eaa22658a8deb9d3bd75c4f900b8439ac053",
+            "9511eb90311692dba1df5cabe16835545d8105a3a51bb1a4e2e3e77625789e59",
+            "bab2454581ba3c31d61525e341c6e45dae64d63ddeb18ec7246104225d9aad27",
         ],
         [
-            "52959827c6c7d3e3b6b50089db8a9524243ae7cee3f9ad7eff477587683af118",
-            "031d982caf72aa660a68d79439cedd0e0c47d09f9b6c90d1a0c322291591616e",
-            "8dd9423dcc8d08c951330954c99eb508395ac26a3e6d864df907ad1b23fd6a37",
+            "38af5f517bc769ef83371332d83c438b9a15cafb94718c2d417a2b5595919325",
+            "ba6d043159102150818942f0bfca69377198ce93d7df638814b4a84df74e7e3f",
+            "ba6d043159102150818942f0bfca69377198ce93d7df638814b4a84df74e7e3f",
+            "b3c91ba8db89652d7c93568e141479644b27fbefbb9f8ebd66697c2f3b40fc12",
         ],
         [
-            "12c77ad0259120089f5bfb841999e9e17acf71a00ef7891366e3f286c0122790",
-            "ce7cb3c1789b119987d36ed73dd40db07099ae9eca8b8ee53f63f610728d7600",
-            "8cdcc4d90a94f8148619bc7a32d230e8bbd4416051f53da3ebda320a40904128",
+            "84b40c80c5c44f91e7165328f84db2507c8fd0fb58cd939705565dc60f98d4ab",
+            "7cfb1e927d172cfd0fecf3616bd3077a1e485f8487f5f792a44af24602aeee78",
+            "0796354388c13f2f43263a04791be6f341c0827dca22cf602e3711aeff3c270d",
+            "33c419bdec3cbc5bf10811f53c8745e7832d38b0fd4f4975150989e763431702",
         ],
         [
-            "db46139a816b40cc15be3b82cd799f025cfa0817552bf959386e0a264184a419",
-            "03778d7eee1973fbe8a45670bc2172a8fbc8e0627cf81ad932f7bbedc1aca177",
-            "f3382b89603501ac8a5038aeda9422af88a2557f6a831b20062518733d59382d",
+            "fcb6c9a0acbea273445cc1c84c5fe486ba88f76ff6197e4d66732ac1b7905e0e",
+            "a865fcb0d433c9205079046ddff9e3add7b3d5b85eabf77570aef6221625845a",
+            "82d52b90191fa82e6125352d0df011f40d1c52c936d8472c80ab5f39be4dc275",
+            "a500286f77a44da3954cd2d28bc6ceb698fe9b5f59296494cdba2223ed82781d",
+        ],
+        [
+            "3a89d10d54534bc595f95b7266ea95a7509a13e35eaede55be49931c73e29f51",
+            "9a2fd476dbc15148a72d2915223142060ebee6e8fce2a110bc00977d618f4354",
+            "6d027e1197c78eeed729cdf0a08b25f6c2a36d726dcf2dc7592cbf22a64c4667",
+            "26591aa301c6b90b41bb2d7d227b7513446a2281138135b606b2ccfd67073d28",
+        ],
+        [
+            "5ad1beed45793f7e7fd2b59b1d3c64441087c31f5edbc71d5adacf3e87f3b409",
+            "69947803a666ae9746282ec985bb140473bd2cca8e7e806e6b7c63dba12abf09",
+            "e562faef7f4846624819ed16de66bfbc5cee8c7200d2579fa81ee00e457d0c41",
+            "304f86219a3b6f8045038baa1d51271c69b4594582b05409fb08310d15893830",
+        ],
+        [
+            "248c40bf9a05281c5c42d884c37d916c4dface070f936d293f30a1d05bce5caa",
+            "ea506f676538b2aa4c60092026453ecb37a3562295be551d134cb334063aad4a",
+            "27934d458e6c253b0211a6d5ffead34a7f18264c9744c8d860a5af02b486960e",
+            "3fb9e265959e9ce605f662d983cf5c7606be10cf95dcf1eb96931d7d189fcd1f",
+        ],
+        [
+            "88d60d17395bb4df69205cc2750bb2e83f8646aa56acaaeccdaec527e085bcc2",
+            "ae62dc36e3f8bcc7c436cb8adb1b931af32bbe1501d048dc50d9947399f0ac0c",
+            "ae62dc36e3f8bcc7c436cb8adb1b931af32bbe1501d048dc50d9947399f0ac0c",
+            "1e8c4ba9a54eccd2bd9020c8333033857187eab8e17aa40f46e22acaca07d31e",
+        ],
+        [
+            "39e952a23697e05cf624e82c36c36bb51d546ffef5aa4fc4d7b695a51cae499a",
+            "8d04ce07d2251923e7c871df78ad6eb56db6c0c8b4b11864c2078f91dce17c1f",
+            "94d13ad7430c8d95f9687b7f030bd22079471f02c96938fabe1d8eac13ad0e3b",
+            "f33d05d0a975fcd9777db0e78a4c74ec161d90026c29dfc2bdaf79d1a24d6c0d",
+        ],
+        [
+            "d6111d6215c5e799b92331c0e2984f25de42e9c02e37d53abad8b7cb2a9c5e9f",
+            "8fb6b77c034c1b96eca447a1192e54e8efd14944595f2d8f37e0bb13b9537e59",
+            "0bce86adc6fee70bb5ecb91c56afe59dd0cdf7a92bf6fa75347a48fa91bcb35c",
+            "ff8143b7f3dd11e594ba558c0bc67116676376637971c03394d707a642f1fc25",
+        ],
+        [
+            "d08d3be3602c52c45df91f7b8b16132f779e8336f88a4e6ad320874eaabf60a2",
+            "04dd9e5f7311cb8ba72487effab05b8ecbd89f3c7f2e18733d2bda22a4ebd00e",
+            "04dd9e5f7311cb8ba72487effab05b8ecbd89f3c7f2e18733d2bda22a4ebd00e",
+            "80c34dd01d6832dbb2589120b905f302c8a7adf5b7aac0418c9c6ebb0fad4e35",
         ],
         // The following key sets have a v_in_sqrt value of 0
-        [
-            "51a8b03750f4b34922d3588b73a556a09594b7b014d2b7cefa26bb8c5eee6d2e",
-            "e8db45df5146d3745eae81e722af5e030a9a999a3e0d588f84514b125029b81b",
-            "f859efb4704b0b4c71959b02976de3ea9746f01e5adacddddba10ee08178cd1d",
-        ],
-        [
-            "d5a46dfdf2c66a76c312e83954fc0cf54f75ff14c2d6febfeb08153e34f54cfd",
-            "08a6adca98cbee754c3cdb103b5d9f69e61b87c64339947cbbaa1a956df5b745",
-            "139b06604063d7942540fbd33de329a2f733c65a89fd68151743896744397c2b",
-        ],
-        [
-            "a06917dc2988e4b51559ab26e25fd920e8fec2f8f2fe0f4c3c725dce06de7867",
-            "868603c764dff5f6db6f963237731452c469dfa2c8c5b682cfec85fc38661415",
-            "2bdd5f3dcaeefa352f200306be3471ad90a0a0ac4b6abba44230e284a852b813",
-        ],
-        [
-            "7acad18a021a568d2abaf079d046f5eb55e081a32b00d4f6c77f8b8c9afed866",
-            "8e0f52904421469a46b2d636b9d17595573071d16ebff280fc88829b5ef8bd4f",
-            "abc0de8594713993eab06144fe9b6d7bd04227c62bda19ef984008a93161fb33",
-        ],
-        [
-            "c547b93c519a1c0b40b71fe7b08e13b38639564e9317f6b58c5f99d5ad82471a",
-            "687fe9c6fe84e94ef0f7344abdac92dfd60dabc6156c1a3eea19d0d06705b461",
-            "8b0ea3b2215bf829aedd250c629557ca646515861aa0b7fc881c50d622f9ac38",
-        ],
-        [
-            "77e48dfa107bbfdda73f50ec2c38347e4fcc9c38866adb75488a2143993a058f",
-            "7d124e12af90216f26ce3198f6b02e76faf990dd248cdb246dd80d4e1fef3d4d",
-            "128481624af3015c6226428a247514370800f212a7a06c90dfe4f1aa672d3b3e",
-        ],
     ]
 }
 

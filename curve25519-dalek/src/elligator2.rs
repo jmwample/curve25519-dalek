@@ -2,7 +2,7 @@
 
 //! Functions mapping curve points to representative values
 //! (indistinguishable from random), and back again.
-use crate::backend::serial::u64::constants::SQRT_AD_MINUS_ONE;
+use crate::backend::serial::u64::constants::SQRT_M1;
 use crate::constants::{MONTGOMERY_A, MONTGOMERY_A_NEG};
 use crate::field::FieldElement;
 use crate::montgomery::MontgomeryPoint;
@@ -63,11 +63,11 @@ pub fn representative_from_privkey(privkey: &[u8; 32], tweak: u8) -> Option<[u8;
     }
     */
 
-    EdwardsPoint::mul_base_clamped_dirty(*privkey).and_then(|u|
-        representative_from_pubkey(&u, tweak).into()
-    ).into()
+    let u = EdwardsPoint::mul_base_clamped_dirty(*privkey);
+    representative_from_pubkey(&u, tweak).into()
 }
 
+/// Low order point Edwards x-coordinate `sqrt((sqrt(d + 1) + 1) / d)`.
 const LOW_ORDER_POINT_X: FieldElement = FieldElement::from_limbs([
     0x00014646c545d14a,
     0x0006027cbc471bd4,
@@ -75,6 +75,7 @@ const LOW_ORDER_POINT_X: FieldElement = FieldElement::from_limbs([
     0x0005147499cc991c,
     0x0001fd5b9a006394,
 ]);
+/// Low order point Edwards y-coordinate `-lop_x * sqrtm1`
 const LOW_ORDER_POINT_Y: FieldElement = FieldElement::from_limbs([
     0x0007b2c28f95e826,
     0x0006513e9868b604,
@@ -83,48 +84,48 @@ const LOW_ORDER_POINT_Y: FieldElement = FieldElement::from_limbs([
     0x00005fc536d88023,
 ]);
 
+const FE_MINUS_TWO: FieldElement = FieldElement::from_limbs([
+    2251799813685227,
+    2251799813685247,
+    2251799813685247,
+    2251799813685247,
+    2251799813685247,
+]);
+
 fn select_low_order_point(a: &FieldElement, b: &FieldElement, cofactor: u8) -> FieldElement {
     // bit 0
-    let c0 = Choice::from((cofactor>>0)&1);
-    let out = FieldElement::conditional_select(a, &FieldElement::ZERO, c0);
+    let c0 = !Choice::from((cofactor >> 1) & 1);
+    let out = FieldElement::conditional_select(b, &FieldElement::ZERO, c0);
 
     // bit 1
-    let c1 = Choice::from((cofactor>>1)&1);
-    let mut out = FieldElement::conditional_select(b, &out, c1);
+    let c1 = !Choice::from((cofactor >> 0) & 1);
+    let mut out = FieldElement::conditional_select(a, &out, c1);
 
     // bit 2
-    let c2 = Choice::from((cofactor>>2)&1);
-    FieldElement::conditional_negate(&mut out, c2);
-
+    let c2 = Choice::from((cofactor >> 2) & 1);
+    out.conditional_negate( c2);
     out
 }
 
+#[cfg(feature="alloc")]
 impl EdwardsPoint {
     /// Multiply the basepoint by `clamp_integer(bytes)`. For a description of clamping, see
     /// [`clamp_integer`].
-    pub(crate) fn mul_base_clamped_dirty(privkey: [u8; 32]) -> CtOption<EdwardsPoint> {
-        let low_order_point_x =
-            select_low_order_point(&LOW_ORDER_POINT_X, &SQRT_AD_MINUS_ONE, privkey[0]);
-        let (a, _) = privkey[0].overflowing_add(2);
-        let low_order_point_y =
-            select_low_order_point(&LOW_ORDER_POINT_Y, &FieldElement::ONE, a);
-        let low_order_point_t = &low_order_point_x * &low_order_point_y;
-
+    pub(crate) fn mul_base_clamped_dirty(privkey: [u8; 32]) -> Self {
+        let lop_x = select_low_order_point(&LOW_ORDER_POINT_X, &SQRT_M1, privkey[0]);
+        let (cofactor, _) = privkey[0].overflowing_add(2);
+        let lop_y = select_low_order_point(&LOW_ORDER_POINT_Y, &FieldElement::ONE, cofactor);
+        let lop_t = &lop_x * &lop_y;
 
         let low_order_point = EdwardsPoint {
-            X: low_order_point_x,
-            Y: low_order_point_y,
+            X: lop_x,
+            Y: lop_y,
             Z: FieldElement::ONE,
-            T: low_order_point_t,
+            T: lop_t,
         };
 
-        // if our low order point is not low order, something has gone wrong.
-        let ok = Choice::from(low_order_point.is_small_order() as u8);
-
         // add the low order point to the public key
-        let pk = EdwardsPoint::mul_base_clamped(privkey);
-        let pk = &pk + &low_order_point;
-        CtOption::new(pk, ok)
+        EdwardsPoint:: mul_base_clamped(privkey) + &low_order_point
     }
 }
 
@@ -132,25 +133,24 @@ impl EdwardsPoint {
 fn representative_from_pubkey(pubkey: &EdwardsPoint, tweak: u8) -> CtOption<[u8; 32]> {
     let mut t1 = FieldElement::from_bytes(&pubkey.to_montgomery().0);
 
-    // 2 * u * (u + A)
-    let t2 = &MONTGOMERY_A + &t1;
-    let mut t3 = &(&t1 * &t2) * &(&FieldElement::ONE + &FieldElement::ONE);
-    let (t3_is_sq, _) = FieldElement::sqrt_ratio_i(&t3, &FieldElement::ONE);
+        // -2 * u * (u + A)
+        let t2 = &t1 + &MONTGOMERY_A;
+        let t3 = &(&t1 * &t2) * &FE_MINUS_TWO;
 
-    // t1.Select(t2, t1, int(tweak&1))
-    t1 = FieldElement::conditional_select(&t1, &t2, Choice::from(tweak & 1));
-    t3 = &t1 * &t3;
-    t1 = &t3 * &(&FieldElement::ONE + &FieldElement::ONE);
-    t3.negate();
-    let tmp: u8 = t1.as_bytes()[0] & 1;
-    t3 = FieldElement::conditional_select(&t2, &t3, Choice::from(tmp));
+        let (is_sq, mut t3) = FieldElement::sqrt_ratio_i(&FieldElement::ONE, &t3);
 
-    // get representative and pad with bits from the tweak.
-    let mut representative = t3.as_bytes();
-    representative[31] &= tweak & MASK_SET_BYTE;
+        t1 = FieldElement::conditional_select(&t1,&t2, Choice::from(tweak & 1));
+        t3 = &t1 * &t3;
+        t1 = &t3 + &t3;
 
-    CtOption::new(representative, t3_is_sq).into()
+        let tmp: u8 = t1.as_bytes()[0] & 1;
+        t3.conditional_negate(Choice::from(tmp));
 
+        // get representative and pad with bits from the tweak.
+        let mut representative = t3.as_bytes();
+        representative[31] |= tweak & MASK_SET_BYTE;
+
+        CtOption::new(representative, is_sq)
 }
 
 /// This function is used to map a curve point (i.e. an x25519 public key)
