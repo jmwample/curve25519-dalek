@@ -96,7 +96,7 @@ impl EphemeralSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        if cfg!(feature="elligator2") {
+        if cfg!(feature = "elligator2") {
             // read an extra byte for elligator representative randomness
             csprng.fill_bytes(&mut tweak);
         }
@@ -164,7 +164,7 @@ impl ReusableSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        if cfg!(feature="elligator2") {
+        if cfg!(feature = "elligator2") {
             // read an extra byte for elligator representative randomness
             csprng.fill_bytes(&mut tweak);
         }
@@ -230,7 +230,7 @@ impl StaticSecret {
         let mut bytes = [0u8; 32];
         let mut tweak = [0u8; 1];
         csprng.fill_bytes(&mut bytes);
-        if cfg!(feature="elligator2") {
+        if cfg!(feature = "elligator2") {
             // read an extra byte for elligator representative randomness
             csprng.fill_bytes(&mut tweak);
         }
@@ -524,4 +524,3 @@ impl<'a> From<&'a PublicRepresentative> for PublicKey {
         PublicKey(point)
     }
 }
-

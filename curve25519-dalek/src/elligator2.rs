@@ -103,11 +103,11 @@ fn select_low_order_point(a: &FieldElement, b: &FieldElement, cofactor: u8) -> F
 
     // bit 2
     let c2 = Choice::from((cofactor >> 2) & 1);
-    out.conditional_negate( c2);
+    out.conditional_negate(c2);
     out
 }
 
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 impl EdwardsPoint {
     /// Multiply the basepoint by `clamp_integer(bytes)`. For a description of clamping, see
     /// [`clamp_integer`].
@@ -125,7 +125,7 @@ impl EdwardsPoint {
         };
 
         // add the low order point to the public key
-        EdwardsPoint:: mul_base_clamped(privkey) + &low_order_point
+        EdwardsPoint::mul_base_clamped(privkey) + &low_order_point
     }
 }
 
@@ -133,24 +133,24 @@ impl EdwardsPoint {
 fn representative_from_pubkey(pubkey: &EdwardsPoint, tweak: u8) -> CtOption<[u8; 32]> {
     let mut t1 = FieldElement::from_bytes(&pubkey.to_montgomery().0);
 
-        // -2 * u * (u + A)
-        let t2 = &t1 + &MONTGOMERY_A;
-        let t3 = &(&t1 * &t2) * &FE_MINUS_TWO;
+    // -2 * u * (u + A)
+    let t2 = &t1 + &MONTGOMERY_A;
+    let t3 = &(&t1 * &t2) * &FE_MINUS_TWO;
 
-        let (is_sq, mut t3) = FieldElement::sqrt_ratio_i(&FieldElement::ONE, &t3);
+    let (is_sq, mut t3) = FieldElement::sqrt_ratio_i(&FieldElement::ONE, &t3);
 
-        t1 = FieldElement::conditional_select(&t1,&t2, Choice::from(tweak & 1));
-        t3 = &t1 * &t3;
-        t1 = &t3 + &t3;
+    t1 = FieldElement::conditional_select(&t1, &t2, Choice::from(tweak & 1));
+    t3 = &t1 * &t3;
+    t1 = &t3 + &t3;
 
-        let tmp: u8 = t1.as_bytes()[0] & 1;
-        t3.conditional_negate(Choice::from(tmp));
+    let tmp: u8 = t1.as_bytes()[0] & 1;
+    t3.conditional_negate(Choice::from(tmp));
 
-        // get representative and pad with bits from the tweak.
-        let mut representative = t3.as_bytes();
-        representative[31] |= tweak & MASK_SET_BYTE;
+    // get representative and pad with bits from the tweak.
+    let mut representative = t3.as_bytes();
+    representative[31] |= tweak & MASK_SET_BYTE;
 
-        CtOption::new(representative, is_sq)
+    CtOption::new(representative, is_sq)
 }
 
 /// This function is used to map a curve point (i.e. an x25519 public key)

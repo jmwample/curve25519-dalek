@@ -92,7 +92,7 @@ fn bitwise_entropy() {
         bitcounts.entry(&alice_representative);
 
         let pub_from_repr = MontgomeryPoint::map_to_point(&alice_representative);
-        let pub_from_priv = EdwardsPoint::mul_base_clamped(privkey).to_montgomery();
+        let pub_from_priv = EdwardsPoint::mul_base_clamped_dirty(privkey).to_montgomery();
         assert_eq!(
             hex::encode(pub_from_priv.as_bytes()),
             hex::encode(pub_from_repr.as_bytes()),
