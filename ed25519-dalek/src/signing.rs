@@ -23,7 +23,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::Sha512;
 use subtle::{Choice, ConstantTimeEq};
 
-use curve25519_elligator2::{
+use curve25519_dalek::{
     digest::{generic_array::typenum::U64, Digest},
     edwards::{CompressedEdwardsY, EdwardsPoint},
     scalar::Scalar,
@@ -774,7 +774,7 @@ impl<'d> Deserialize<'d> for SigningKey {
                     ));
                 }
 
-                Ok(SigningKey::from(bytes))
+                SigningKey::try_from(bytes).map_err(serde::de::Error::custom)
             }
         }
 

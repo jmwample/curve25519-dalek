@@ -1,4 +1,4 @@
-use curve25519_elligator2::edwards::EdwardsPoint;
+use curve25519_dalek::edwards::EdwardsPoint;
 
 use x25519_dalek::*;
 
@@ -118,7 +118,7 @@ fn rfc7748_ladder_test1_vectorset2() {
 #[test]
 #[ignore] // Run only if you want to burn a lot of CPU doing 1,000,000 DH operations
 fn rfc7748_ladder_test2() {
-    use curve25519_elligator2::constants::X25519_BASEPOINT;
+    use curve25519_dalek::constants::X25519_BASEPOINT;
 
     let mut k: [u8; 32] = X25519_BASEPOINT.0;
     let mut u: [u8; 32] = X25519_BASEPOINT.0;

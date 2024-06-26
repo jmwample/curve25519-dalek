@@ -21,7 +21,7 @@ use hex_literal::hex;
 mod vectors {
     use super::*;
 
-    use curve25519_elligator2::{
+    use curve25519_dalek::{
         constants::ED25519_BASEPOINT_POINT,
         edwards::{CompressedEdwardsY, EdwardsPoint},
         scalar::Scalar,
@@ -146,7 +146,7 @@ mod vectors {
     // The remaining items in this mod are for the repudiation tests
     //
 
-    // Taken from curve25519_elligator2::constants::EIGHT_TORSION[4]
+    // Taken from curve25519_dalek::constants::EIGHT_TORSION[4]
     const EIGHT_TORSION_4: [u8; 32] = [
         236, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 127,
@@ -468,7 +468,7 @@ mod integrations {
         let ed = verifying_key.to_edwards();
 
         // Check that to_edwards and From return same result:
-        assert_eq!(ed, curve25519_elligator2::EdwardsPoint::from(verifying_key));
+        assert_eq!(ed, curve25519_dalek::EdwardsPoint::from(verifying_key));
 
         // The verifying key serialization is simply the compressed Edwards point
         assert_eq!(verifying_key.to_bytes(), ed.compress().0);

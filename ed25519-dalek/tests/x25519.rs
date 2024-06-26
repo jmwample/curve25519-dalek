@@ -1,6 +1,6 @@
 //! Tests for converting Ed25519 keys into X25519 (Montgomery form) keys.
 
-use curve25519_elligator2::scalar::{clamp_integer, Scalar};
+use curve25519_dalek::scalar::{clamp_integer, Scalar};
 use ed25519_dalek::SigningKey;
 use hex_literal::hex;
 use sha2::{Digest, Sha512};

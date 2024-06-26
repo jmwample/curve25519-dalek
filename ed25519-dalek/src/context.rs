@@ -22,7 +22,7 @@ use crate::{InternalError, SignatureError};
 )]
 /// # fn main() {
 /// use ed25519_dalek::{Signature, SigningKey, VerifyingKey, Sha512};
-/// # use curve25519_elligator2::digest::Digest;
+/// # use curve25519_dalek::digest::Digest;
 /// # use rand::rngs::OsRng;
 /// use ed25519_dalek::{DigestSigner, DigestVerifier};
 ///
@@ -83,7 +83,7 @@ mod test {
     #![allow(clippy::unwrap_used)]
 
     use crate::{Signature, SigningKey, VerifyingKey};
-    use curve25519_elligator2::digest::Digest;
+    use curve25519_dalek::digest::Digest;
     use ed25519::signature::{DigestSigner, DigestVerifier};
     use rand::rngs::OsRng;
     use sha2::Sha512;

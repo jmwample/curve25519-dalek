@@ -15,14 +15,14 @@
 
 use crate::{InternalError, SignatureError};
 
-use curve25519_elligator2::scalar::{clamp_integer, Scalar};
+use curve25519_dalek::scalar::{clamp_integer, Scalar};
 
 #[cfg(feature = "zeroize")]
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // These are used in the functions that are made public when the hazmat feature is set
 use crate::{Signature, VerifyingKey};
-use curve25519_elligator2::digest::{generic_array::typenum::U64, Digest};
+use curve25519_dalek::digest::{generic_array::typenum::U64, Digest};
 
 /// Contains the secret scalar and domain separator used for generating signatures.
 ///
@@ -244,7 +244,7 @@ mod test {
     #[cfg(feature = "digest")]
     #[test]
     fn sign_verify_prehashed_nonspec() {
-        use curve25519_elligator2::digest::Digest;
+        use curve25519_dalek::digest::Digest;
 
         // Generate the keypair
         let rng = OsRng;
