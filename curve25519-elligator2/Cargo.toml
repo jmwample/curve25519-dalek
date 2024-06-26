@@ -76,4 +76,4 @@ elligator2 = []
 digest = ["dep:digest", "elligator2"]
 
 [target.'cfg(all(not(curve25519_dalek_backend = "fiat"), not(curve25519_dalek_backend = "serial"), target_arch = "x86_64"))'.dependencies]
-curve25519-dalek-derive = { version = "0.1" }
+curve25519-dalek-derive = { version = "0.1.1" }
