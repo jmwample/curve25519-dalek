@@ -167,7 +167,7 @@ pub trait MapToPointVariant {
     }
 }
 
-/// Converts to/from a point on elliptic curve E (Curve25519) given an element of
+/// Converts between a point on elliptic curve E (Curve25519) and an element of
 /// the finite field F over which E is defined. See section 6.7.1 of
 /// [RFC 9380 specification](https://datatracker.ietf.org/doc/rfc9380/).
 ///
@@ -205,6 +205,11 @@ impl MapToPointVariant for RFC9380 {
     }
 }
 
+/// Converts between a point on elliptic curve E (Curve25519) and an element of
+/// the finite field F over which E is defined. Ensures that generated field
+/// elements are indistinguishable from uniform random at the cost of compatability
+/// with RFC 9380.
+///
 /// Differs from [`RFC9380`] in the implementation of the `to_representative` function
 /// as RFC9380 misses a computational distinguisher that would allow an attacker to
 /// distinguish the representative from random bytes.
@@ -226,9 +231,9 @@ impl MapToPointVariant for Randomized {
 }
 
 #[cfg(feature = "digest")]
-/// Calculates a point on elliptic curve E (Curve25519) from an element of
-/// the finite field F over which E is defined. See section 6.7.1 of
-/// [RFC 9380 specification](https://datatracker.ietf.org/doc/rfc9380/).
+/// Converts between a point on elliptic curve E (Curve25519) and an element of
+/// the finite field F over which E is defined. Supports older implementations
+/// with a common implementation bug (Signal, Kleshni-C).
 ///
 /// In contrast to the [`RFC9380`] variant, `Legacy` does NOT assume that input values are always
 /// going to be the least-square-root representation of the field element.
