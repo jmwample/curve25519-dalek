@@ -614,7 +614,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "alloc")]
-    #[cfg(feature = "elligator2")]
+    #[cfg(feature = "digest")]
     fn montgomery_elligator_correct() {
         let bytes: Vec<u8> = (0u8..32u8).collect();
         let bits_in: [u8; 32] = (&bytes[..]).try_into().expect("Range invariant broken");
