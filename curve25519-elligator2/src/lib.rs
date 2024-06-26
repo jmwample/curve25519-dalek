@@ -28,7 +28,7 @@
 // Documentation:
 //------------------------------------------------------------------------
 #![doc(
-    html_logo_url = "https://cdn.jsdelivr.net/gh/dalek-cryptography/curve25519-elligator2/docs/assets/dalek-logo-clear.png"
+    html_logo_url = "https://cdn.jsdelivr.net/gh/dalek-cryptography/curve25519-dalek/docs/assets/dalek-logo-clear.png"
 )]
 #![doc = include_str!("../README.md")]
 //------------------------------------------------------------------------
