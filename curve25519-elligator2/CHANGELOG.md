@@ -3,6 +3,11 @@
 Entries are listed in reverse chronological order per undeprecated
 major series.
 
+## [0.1.0-alpha.0](https://github.com/jmwample/curve25519-dalek/releases/tag/curve25519-elligator2-v0.1.0-alpha.0) - 2024-06-26
+
+### Other
+- Interim crate ([#3](https://github.com/jmwample/curve25519-dalek/pull/3))
+
 ## 4.x series
 
 ### 4.1.2
