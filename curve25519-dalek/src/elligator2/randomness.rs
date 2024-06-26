@@ -83,16 +83,18 @@ fn bitwise_entropy() {
 
     while i < ITERATIONS {
         rng.fill_bytes(&mut privkey);
-        let alice_representative = match representative_from_privkey(&privkey, rng.next_u32() as u8)
-        {
-            None => continue,
-            Some(r) => r,
-        };
+        let alice_representative =
+            match Randomized::to_representative(&privkey, rng.next_u32() as u8).into() {
+                None => continue,
+                Some(r) => r,
+            };
 
         bitcounts.entry(&alice_representative);
 
-        let pub_from_repr = MontgomeryPoint::map_to_point(&alice_representative);
-        let pub_from_priv = EdwardsPoint::mul_base_clamped_dirty(privkey).to_montgomery();
+        let pub_from_repr =
+            MontgomeryPoint::from_representative::<Randomized>(&alice_representative)
+                .expect("failed pub from repres");
+        let pub_from_priv = Randomized::mul_base_clamped(privkey).to_montgomery();
         assert_eq!(
             hex::encode(pub_from_priv.as_bytes()),
             hex::encode(pub_from_repr.as_bytes()),
@@ -152,7 +154,7 @@ fn test_canonical() {
 
     while i < ITERATIONS {
         rng.fill_bytes(&mut privkey);
-        let alice_representative = match representative_from_privkey(&privkey, 0u8) {
+        let alice_representative = match Randomized::to_representative(&privkey, 0u8).into() {
             None => continue,
             Some(r) => r,
         };

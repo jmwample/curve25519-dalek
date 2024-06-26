@@ -1,13 +1,135 @@
 // -*- mode: rust; -*-
 
-//! Functions mapping curve points to representative values
-//! (indistinguishable from random), and back again.
-use crate::backend::serial::u64::constants::SQRT_M1;
-use crate::constants::{MONTGOMERY_A, MONTGOMERY_A_NEG};
+//! Functions mapping curve points to representative (random) values
+//! and back again.
+//!
+//! ## Usage
+//!
+//! ```rust ignore
+//! use rand::RngCore;
+//! use curve25519_dalek::{RFC9380, MapToPointVariant};
+//!
+//! type A = RFC9380;
+//!
+//! let mut rng = rand::thread_rng();
+//! let mut privkey = [0_u8;32];
+//! rng.fill_bytes(&mut privkey);
+//! let tweak = rng.next_u32() as u8;
+//!
+//! let public_key = A::mul_base_clamped(privkey);
+//! // only about half of points are representable, so this will fail ~50% of the time.
+//! let representative = A::to_representative(&privkey, tweak)
+//!     .expect("non representable point :(" );
+//!
+//! // The representative gets distributed in place of the public key,
+//! // it can then be converted back into the curve25519 point.
+//! let public_key1 = A::from_representative(&representative).unwrap();
+//!
+//! # let p = public_key.to_montgomery().to_bytes();
+//! # let p1 = public_key1.to_montgomery().to_bytes();
+//! # assert_eq!(hex::encode(&p), hex::encode(&p1));
+//! ```
+//!
+//! The elligator2 transforms can also be applied to [`MontgomeryPoint`] and
+//! [`EdwardsPoint`] objects themselves.
+//!
+//! ```rust
+//! use rand::RngCore;
+//! use curve25519_dalek::{RFC9380, Randomized, MapToPointVariant, MontgomeryPoint, EdwardsPoint};
+//!
+//! // Montgomery Points can be mapped to and from elligator representatives
+//! // using any algorithm variant.
+//! let tweak = rand::thread_rng().next_u32() as u8;
+//! let mont_point = MontgomeryPoint::default(); // example point known to be representable
+//! let r = mont_point.to_representative::<RFC9380>(tweak).unwrap();
+//!
+//! _ = MontgomeryPoint::from_representative::<RFC9380>(&r).unwrap();
+//!
+//! // Edwards Points can be transformed as well.
+//! let edw_point = EdwardsPoint::default(); // example point known to be representable
+//! let r = edw_point.to_representative::<Randomized>(tweak).unwrap();
+//!
+//! _ = EdwardsPoint::from_representative::<Randomized>(&r).unwrap();
+//! ```
+//!
+//! ### Generating Representable Points.
+//!
+//! As only about 50% of points are actually representable using elligator2. In
+//! order to guarantee that generated points are representable we can just try
+//! in a loop as the probability of overall success (given a proper source of
+//! randomness) over `N` trials is approximately `P_success = 1 - (0.5)^N`.
+//!
+//! ```rust
+//! use rand::{RngCore, CryptoRng};
+//! use curve25519_dalek::{MapToPointVariant, Randomized};
+//!
+//! type A = Randomized;
+//! const RETRY_LIMIT: usize = 64;
+//!
+//! pub fn key_from_rng<R: RngCore + CryptoRng>(mut csprng: R) -> ([u8;32], u8) {
+//!     let mut private = [0_u8;32];
+//!     csprng.fill_bytes(&mut private);
+//!
+//!     // The tweak only needs generated once as it doesn't affect the overall
+//!     // validity of the elligator2 representative.
+//!     let tweak = csprng.next_u32() as u8;
+//!
+//!     let mut repres: Option<[u8; 32]> =
+//!         A::to_representative(&private, tweak).into();
+//!
+//!     for _ in 0..RETRY_LIMIT {
+//!         if repres.is_some() {
+//!             return (private, tweak)
+//!         }
+//!         csprng.fill_bytes(&mut private);
+//!         repres = A::to_representative(&private, tweak).into();
+//!     }
+//!
+//!     panic!("failed to generate representable secret, bad RNG provided");
+//! }
+//!
+//! let mut rng = rand::thread_rng();
+//! let k = key_from_rng(&mut rng);
+//! ```
+//!
+//! ### Which variant is right for me?
+//!
+//! As the variants are not equivalent and do not generate the same 1) public key
+//! given a private key (`mul_base_clamped`) 2) representative given a private
+//! key (`to_representative`), the variant you choose will depend on your use case.
+//!
+//! The major difference in use case depends on
+//! whether you need to convert public keys to randomized representatives, and
+//! those representatives need to be **indistinguishable from uniform random**.
+//! If this is the case, use [`Randomized`].
+//! If this does not describe your use case, for example, you are interested in
+//! using this implementation for something like `Hash2Curve`, you should instead
+//! use [`RFC9380`].
+//!
+//!
+//! If you are unsure, you will likely want to use the [`RFC9380`] variant.
+//!
+//! ## Security
+//!
+//! As with the backing curve25519-dalek crate, all operations are implemented
+//! using constant-time logic (no secret-dependent branches,
+//! no secret-dependent memory accesses), unless specifically marked as being
+//! variable-time code.
+//!
+//! The [`Randomized`] variant provides a stronger guarantee of being
+//! indistinguishable from uniform randomness, both through statistical analysis
+//! and computational transformations. This is comes at the cost of compatability
+//! with the `Hash2Curve` RFC as the algorithms defined by RFC 9380 and implemented
+//! in the [`RFC9380`] variant can be computationally transformed such that they
+//! are distinguishable from unifrom random points of the field.
+//!
+
+use crate::constants::{MONTGOMERY_A, MONTGOMERY_A_NEG, SQRT_M1};
 use crate::field::FieldElement;
 use crate::montgomery::MontgomeryPoint;
 use crate::EdwardsPoint;
 
+use cfg_if::cfg_if;
 use subtle::{
     Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater,
     CtOption,
@@ -24,7 +146,233 @@ pub(crate) const DIVIDE_MINUS_P_1_2_BYTES: [u8; 32] = [
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f,
 ];
 
-/// Gets a public representative for a key pair using the private key.
+/// Common interface for the different ways to compute the elligator2 forward
+/// and reverse transformations.
+pub trait MapToPointVariant {
+    /// Takes a public representative and returns an Edwards curve field element
+    /// if one exists.
+    fn from_representative(representative: &[u8; 32]) -> CtOption<EdwardsPoint>;
+
+    /// Takes a private key value and gets a byte representation of the public representative.
+    ///
+    /// The `tweak` parameter is used to adjust the computed representative making
+    /// it computationally indistinguishable from uniform random. If this property
+    /// is not required then the provided tweak value does not matter.
+    fn to_representative(point: &[u8; 32], tweak: u8) -> CtOption<[u8; 32]>;
+
+    /// Provides direct access to the scalar base multiplication that will produce
+    /// a public key point from a private key point.
+    fn mul_base_clamped(bytes: [u8; 32]) -> EdwardsPoint {
+        EdwardsPoint::mul_base_clamped(bytes)
+    }
+}
+
+/// Converts to/from a point on elliptic curve E (Curve25519) given an element of
+/// the finite field F over which E is defined. See section 6.7.1 of
+/// [RFC 9380 specification](https://datatracker.ietf.org/doc/rfc9380/).
+///
+/// We add randomness to the top two bits of the generated representative as the
+/// generated values always 0 in those two bits. Similarly we clear the top two
+/// bits of a given representative FieldElement before mapping it to the curve.
+pub struct RFC9380;
+
+impl MapToPointVariant for RFC9380 {
+    fn from_representative(representative: &[u8; 32]) -> CtOption<EdwardsPoint> {
+        let mut r = *representative;
+        r[31] &= MASK_UNSET_BYTE;
+        let representative = FieldElement::from_bytes(&r);
+        let (x, y) = map_fe_to_edwards(&representative);
+        let point = EdwardsPoint {
+            X: x,
+            Y: y,
+            Z: FieldElement::ONE,
+            T: &x * &y,
+        };
+        CtOption::new(point, Choice::from(1))
+    }
+
+    fn to_representative(point: &[u8; 32], tweak: u8) -> CtOption<[u8; 32]> {
+        let pubkey = EdwardsPoint::mul_base_clamped(*point).to_montgomery();
+        let v_in_sqrt = v_in_sqrt(point);
+        let p: Option<[u8; 32]> = point_to_representative(&pubkey, v_in_sqrt.into()).into();
+        match p {
+            None => CtOption::new([0u8; 32], Choice::from(0)),
+            Some(mut a) => {
+                a[31] |= MASK_SET_BYTE & tweak;
+                CtOption::new(a, Choice::from(1))
+            }
+        }
+    }
+}
+
+/// Differs from [`RFC9380`] in the implementation of the `to_representative` function
+/// as RFC9380 misses a computational distinguisher that would allow an attacker to
+/// distinguish the representative from random bytes.
+pub struct Randomized;
+
+impl MapToPointVariant for Randomized {
+    fn from_representative(representative: &[u8; 32]) -> CtOption<EdwardsPoint> {
+        RFC9380::from_representative(representative)
+    }
+
+    fn to_representative(point: &[u8; 32], tweak: u8) -> CtOption<[u8; 32]> {
+        let u = EdwardsPoint::mul_base_clamped_dirty(*point);
+        representative_from_pubkey(&u, tweak)
+    }
+
+    fn mul_base_clamped(bytes: [u8; 32]) -> EdwardsPoint {
+        EdwardsPoint::mul_base_clamped_dirty(bytes)
+    }
+}
+
+#[cfg(feature = "digest")]
+/// Calculates a point on elliptic curve E (Curve25519) from an element of
+/// the finite field F over which E is defined. See section 6.7.1 of
+/// [RFC 9380 specification](https://datatracker.ietf.org/doc/rfc9380/).
+///
+/// In contrast to the [`RFC9380`] variant, `Legacy` does NOT assume that input values are always
+/// going to be the least-square-root representation of the field element.
+/// This is divergent from the specifications for both elligator2 and RFC 9380,
+/// however, some older implementations miss this detail. This allows us to be
+/// compatible with those alternate implementations if necessary, since the
+/// resulting point will be different for inputs with either of the
+/// high-order two bits set. The kleshni C and Signal implementations are examples
+/// of libraries that don't always use the least square root.
+///
+/// In general this mode should NOT be used unless there is a very specific
+/// reason to do so.
+///
+// We return the LSR for to_representative values. This is here purely for testing
+// compatability and ensuring that we understand the subtle differences that can
+// influence proper implementation.
+pub struct Legacy;
+
+#[cfg(feature = "digest")]
+impl MapToPointVariant for Legacy {
+    fn from_representative(representative: &[u8; 32]) -> CtOption<EdwardsPoint> {
+        let representative = FieldElement::from_bytes(representative);
+        let (x, y) = map_fe_to_edwards(&representative);
+        let point = EdwardsPoint {
+            X: x,
+            Y: y,
+            Z: FieldElement::ONE,
+            T: &x * &y,
+        };
+        CtOption::new(point, Choice::from(1))
+    }
+
+    fn to_representative(point: &[u8; 32], _tweak: u8) -> CtOption<[u8; 32]> {
+        let pubkey = EdwardsPoint::mul_base_clamped(*point);
+        let v_in_sqrt = v_in_sqrt_pubkey_edwards(&pubkey);
+        point_to_representative(&MontgomeryPoint(*point), v_in_sqrt.into())
+    }
+}
+
+// ===========================================================================
+// Montgomery and Edwards Interfaces
+// ===========================================================================
+
+impl MontgomeryPoint {
+    #[cfg(feature = "elligator2")]
+    /// Perform the Elligator2 mapping to a [`MontgomeryPoint`].
+    ///
+    /// Calculates a point on elliptic curve E (Curve25519) from an element of
+    /// the finite field F over which E is defined. See section 6.7.1 of the
+    /// RFC. It is assumed that input values are always going to be the
+    /// least-square-root representation of the field element in allignment
+    /// with both the elligator2 specification and RFC9380.
+    ///
+    /// The input r and output P are elements of the field F. Note that
+    /// the output P is a point on the Montgomery curve and as such it's byte
+    /// representation is distinguishable from uniform random.
+    ///
+    /// Input:
+    ///     * r -> an element of field F.
+    ///
+    /// Output:
+    ///     * P - a point on the Montgomery elliptic curve.
+    ///
+    /// See <https://datatracker.ietf.org/doc/rfc9380/>
+    pub fn map_to_point(r: &[u8; 32]) -> MontgomeryPoint {
+        let mut clamped = *r;
+        clamped[31] &= MASK_UNSET_BYTE;
+        let r_0 = FieldElement::from_bytes(&clamped);
+        let (p, _) = map_fe_to_montgomery(&r_0);
+        MontgomeryPoint(p.as_bytes())
+    }
+
+    /// Maps a representative to a curve point.
+    ///
+    /// This function is the inverse of `to_representative`.
+    pub fn from_representative<T: MapToPointVariant>(representative: &[u8; 32]) -> Option<Self> {
+        let b: Option<EdwardsPoint> = T::from_representative(representative).into();
+        b.map(|x| x.to_montgomery())
+    }
+
+    /// Mapts a point on the curve to a representative.
+    pub fn to_representative<T: MapToPointVariant>(&self, tweak: u8) -> Option<[u8; 32]> {
+        T::to_representative(&self.0, tweak).into()
+    }
+}
+
+impl EdwardsPoint {
+    #[cfg(feature = "elligator2")]
+    /// Perform the Elligator2 mapping to an [`EdwardsPoint`].
+    ///
+    /// Calculates a point on elliptic curve E (Curve25519) from an element of
+    /// the finite field F over which E is defined. See section 6.7.1 of the
+    /// RFC.
+    ///
+    /// The input r and output P are elements of the field F. Note that
+    /// the output P is a point on the edwards curve and as such it's byte
+    /// representation is distinguishable from uniform random.
+    ///
+    /// Input:
+    ///     * r -> an element of field F.
+    ///
+    /// Output:
+    ///     * P - a point on the Edwards elliptic curve.
+    ///
+    /// See <https://datatracker.ietf.org/doc/rfc9380/>
+    pub fn map_to_point(r: &[u8; 32]) -> EdwardsPoint {
+        let mut clamped = *r;
+        clamped[31] &= MASK_UNSET_BYTE;
+        let r_0 = FieldElement::from_bytes(&clamped);
+        let (x, y) = map_fe_to_edwards(&r_0);
+        Self::from_xy(&x, &y)
+    }
+
+    #[cfg(feature = "elligator2")]
+    fn from_xy(x: &FieldElement, y: &FieldElement) -> EdwardsPoint {
+        let z = FieldElement::ONE;
+        let t = x * y;
+
+        EdwardsPoint {
+            X: *x,
+            Y: *y,
+            Z: z,
+            T: t,
+        }
+    }
+
+    /// Maps a representative to a curve point.
+    ///
+    /// This function is the inverse of `to_representative`.
+    pub fn from_representative<T: MapToPointVariant>(representative: &[u8; 32]) -> Option<Self> {
+        T::from_representative(representative).into()
+    }
+
+    /// Mapts a point on the curve to a representative.
+    pub fn to_representative<T: MapToPointVariant>(&self, tweak: u8) -> Option<[u8; 32]> {
+        T::to_representative(&self.to_montgomery().0, tweak).into()
+    }
+}
+
+// ===========================================================================
+// Randomized implementation
+// ===========================================================================
+
+/// Gets a public representative for a key pair using the private key (RFC 9380).
 ///
 /// The `tweak` parameter is used to adjust the computed representative making
 /// it computationally indistinguishable from uniform random. If this property
@@ -47,51 +395,55 @@ pub(crate) const DIVIDE_MINUS_P_1_2_BYTES: [u8; 32] = [
 /// ```
 ///
 /// For a more in-depth explanation see:
-/// https://github.com/agl/ed25519/issues/27
-/// https://www.bamsoftware.com/papers/fep-flaws/
+/// <https://github.com/agl/ed25519/issues/27>
+/// <https://www.bamsoftware.com/papers/fep-flaws/>
 pub fn representative_from_privkey(privkey: &[u8; 32], tweak: u8) -> Option<[u8; 32]> {
-    /*
-    let pubkey = EdwardsPoint::mul_base_clamped(*privkey).to_montgomery();
-    let v_in_sqrt = v_in_sqrt(privkey);
-    let p: Option<[u8; 32]> = point_to_representative(&pubkey, v_in_sqrt.into()).into();
-    match p {
-        None => None,
-        Some(mut a) => {
-            a[31] |= MASK_SET_BYTE & tweak;
-            Some(a)
-        }
-    }
-    */
-
-    let u = EdwardsPoint::mul_base_clamped_dirty(*privkey);
-    representative_from_pubkey(&u, tweak).into()
+    RFC9380::to_representative(privkey, tweak).into()
 }
 
-/// Low order point Edwards x-coordinate `sqrt((sqrt(d + 1) + 1) / d)`.
-const LOW_ORDER_POINT_X: FieldElement = FieldElement::from_limbs([
-    0x00014646c545d14a,
-    0x0006027cbc471bd4,
-    0x0003792aed7064f1,
-    0x0005147499cc991c,
-    0x0001fd5b9a006394,
-]);
-/// Low order point Edwards y-coordinate `-lop_x * sqrtm1`
-const LOW_ORDER_POINT_Y: FieldElement = FieldElement::from_limbs([
-    0x0007b2c28f95e826,
-    0x0006513e9868b604,
-    0x0006b37f57c263bf,
-    0x0004589c99e36982,
-    0x00005fc536d88023,
-]);
+cfg_if! {
+    if #[cfg(curve25519_dalek_bits = "64")] {
+        /// Low order point Edwards x-coordinate `sqrt((sqrt(d + 1) + 1) / d)`.
+        const LOW_ORDER_POINT_X: FieldElement = FieldElement::from_limbs([
+            0x00014646c545d14a,
+            0x0006027cbc471bd4,
+            0x0003792aed7064f1,
+            0x0005147499cc991c,
+            0x0001fd5b9a006394,
+        ]);
+        /// Low order point Edwards y-coordinate `-lop_x * sqrtm1`
+        const LOW_ORDER_POINT_Y: FieldElement = FieldElement::from_limbs([
+            0x0007b2c28f95e826,
+            0x0006513e9868b604,
+            0x0006b37f57c263bf,
+            0x0004589c99e36982,
+            0x00005fc536d88023,
+        ]);
+        const FE_MINUS_TWO: FieldElement = FieldElement::from_limbs([
+            2251799813685227,
+            2251799813685247,
+            2251799813685247,
+            2251799813685247,
+            2251799813685247,
+        ]);
+    }
+    else if #[cfg(curve25519_dalek_bits = "32")] {
+        const LOW_ORDER_POINT_X: FieldElement = FieldElement::from_limbs([
+            0x0145d14a, 0x005191b1, 0x00471bd4, 0x01809f2f, 0x017064f1,
+            0x00de4abb, 0x01cc991c, 0x01451d26, 0x02006394, 0x007f56e6
+        ]);
+        const LOW_ORDER_POINT_Y: FieldElement = FieldElement::from_limbs([
+            0x0395e826, 0x01ecb0a3, 0x0068b604, 0x01944fa6, 0x03c263bf,
+            0x01acdfd5, 0x01e36982, 0x01162726, 0x02d88023, 0x0017f14d
+        ]);
+        const FE_MINUS_TWO: FieldElement = FieldElement::from_limbs([
+            0x03ffffeb, 0x01ffffff, 0x03ffffff, 0x01ffffff, 0x03ffffff,
+            0x01ffffff, 0x03ffffff, 0x01ffffff, 0x03ffffff, 0x01ffffff
+        ]);
+    }
+}
 
-const FE_MINUS_TWO: FieldElement = FieldElement::from_limbs([
-    2251799813685227,
-    2251799813685247,
-    2251799813685247,
-    2251799813685247,
-    2251799813685247,
-]);
-
+#[allow(clippy::identity_op)]
 fn select_low_order_point(a: &FieldElement, b: &FieldElement, cofactor: u8) -> FieldElement {
     // bit 0
     let c0 = !Choice::from((cofactor >> 1) & 1);
@@ -107,11 +459,19 @@ fn select_low_order_point(a: &FieldElement, b: &FieldElement, cofactor: u8) -> F
     out
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(feature = "elligator2")]
 impl EdwardsPoint {
     /// Multiply the basepoint by `clamp_integer(bytes)`. For a description of clamping, see
-    /// [`clamp_integer`].
-    pub(crate) fn mul_base_clamped_dirty(privkey: [u8; 32]) -> Self {
+    /// [`clamp_integer`]. This variant integrates a low order point into the resulting
+    /// value in order to prevent a computational distinguisher attack that would allow
+    /// an adversary to check if representatives are always points or order L when multiplied
+    /// with the base point.
+    ///
+    /// > A scalar multiplication with the base point, even one that does not clamp the scalar, will always yield a point of order L. That is, for all s: `L × (s × B) = zero`.
+    /// > A random Elligator2 representative however will only map to a point of order L 12.5% of the time.
+    ///
+    /// [`clamp_integer`]: crate::scalar::clamp_integer
+    pub fn mul_base_clamped_dirty(privkey: [u8; 32]) -> Self {
         let lop_x = select_low_order_point(&LOW_ORDER_POINT_X, &SQRT_M1, privkey[0]);
         let (cofactor, _) = privkey[0].overflowing_add(2);
         let lop_y = select_low_order_point(&LOW_ORDER_POINT_Y, &FieldElement::ONE, cofactor);
@@ -125,7 +485,7 @@ impl EdwardsPoint {
         };
 
         // add the low order point to the public key
-        EdwardsPoint::mul_base_clamped(privkey) + &low_order_point
+        EdwardsPoint::mul_base_clamped(privkey) + low_order_point
     }
 }
 
@@ -153,6 +513,10 @@ fn representative_from_pubkey(pubkey: &EdwardsPoint, tweak: u8) -> CtOption<[u8;
     CtOption::new(representative, is_sq)
 }
 
+// ===========================================================================
+// RFC9380 (and Legacy) implementation
+// ===========================================================================
+
 /// This function is used to map a curve point (i.e. an x25519 public key)
 /// to a point that is effectively indistinguishable from random noise.
 ///
@@ -174,7 +538,7 @@ fn representative_from_pubkey(pubkey: &EdwardsPoint, tweak: u8) -> CtOption<[u8;
 /// # Inputs
 ///
 /// * `point`: the \\(u\\)-coordinate of a point on the curve. Not all
-/// points map to field elements.
+///   points map to field elements.
 ///
 /// * `v_in_sqrt`: true if the \\(v\\)-coordinate of the point is negative.
 ///
@@ -186,13 +550,15 @@ fn representative_from_pubkey(pubkey: &EdwardsPoint, tweak: u8) -> CtOption<[u8;
 /// [elligator paper](https://elligator.cr.yp.to/elligator-20130828.pdf)
 /// [elligator site](https://elligator.org/)
 ///
-pub fn point_to_representative(point: &MontgomeryPoint, v_in_sqrt: bool) -> CtOption<[u8; 32]> {
+pub(crate) fn point_to_representative(
+    point: &MontgomeryPoint,
+    v_in_sqrt: bool,
+) -> CtOption<[u8; 32]> {
     let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
 
     // a := point
     let a = &FieldElement::from_bytes(&point.0);
-    let mut a_neg = *a;
-    a_neg.negate();
+    let a_neg = -a;
 
     let is_encodable = is_encodable(a);
 
@@ -228,7 +594,7 @@ fn is_encodable(u: &FieldElement) -> Choice {
 
     let b2 = &(&b0.square().square().square() * &b0.square().square()) * &b0.square(); // (u + A)^14
     let mut chi = &(&c.square().square() * &u.square()) * &b2; // chi = -c^4 * u^2 * (u + A)^14
-    chi.negate();
+    chi = -&chi;
 
     let chi_bytes = chi.as_bytes();
 
@@ -275,7 +641,7 @@ pub(crate) fn high_y(d: &FieldElement) -> Choice {
 // [`PublicRepresentative`] in the [`x25519_dalek`] crate. AFAIK there is no
 // need for anyone with only the public key to be able to generate the
 // representative.
-pub fn v_in_sqrt(key_input: &[u8; 32]) -> Choice {
+pub(crate) fn v_in_sqrt(key_input: &[u8; 32]) -> Choice {
     let mut masked_pk = *key_input;
     masked_pk[0] &= 0xf8;
     masked_pk[31] &= 0x7f;
@@ -287,7 +653,7 @@ pub fn v_in_sqrt(key_input: &[u8; 32]) -> Choice {
 
 /// Determines if `V <= (p - 1)/2` for an EdwardsPoint (e.g an x25519 public key)
 /// and returns a [`Choice`] indicating the result.
-pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
+pub(crate) fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
     let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
 
     // sqrtMinusAPlus2 is sqrt(-(486662+2))
@@ -309,16 +675,15 @@ pub fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
     divide_minus_p_1_2.ct_gt(&v)
 }
 
-// ----------------------------------------------------------------------------
-// ----------------------------------------------------------------------------
+// ============================================================================
+// ============================================================================
 
 fn map_to_curve_parts(
     r: &FieldElement,
 ) -> (FieldElement, FieldElement, FieldElement, FieldElement) {
     let zero = FieldElement::ZERO;
     let one = FieldElement::ONE;
-    let mut minus_one = FieldElement::ONE;
-    minus_one.negate();
+    let minus_one = -&FieldElement::ONE;
 
     // Exceptional case 2u^2 == -1
     let mut tv1 = r.square2();
@@ -389,9 +754,9 @@ pub(crate) fn map_fe_to_edwards(r: &FieldElement) -> (FieldElement, FieldElement
     (&xn * &(xd.invert()), &yn * &(yd.invert()))
 }
 
-// ------------------------------------------------------------------------
+// ========================================================================
 // Tests
-// ------------------------------------------------------------------------
+// ========================================================================
 
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
@@ -409,3 +774,8 @@ mod randomness;
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
 mod subgroup;
+
+#[cfg(test)]
+#[cfg(feature = "elligator2")]
+#[cfg(feature = "digest")]
+mod legacy;

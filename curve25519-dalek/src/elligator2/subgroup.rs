@@ -41,8 +41,8 @@ fn pubkey_subgroup_check() {
     // Returns a new edwards25519.Point that is v multiplied by the subgroup order.
     let scalar_mult_order = |v: &EdwardsPoint| -> EdwardsPoint {
         // v * (L - 1) + v => v * L
-        let p = v * &scalar_order_minus1;
-        &p + v
+        let p = v * scalar_order_minus1;
+        p + v
     };
 
     // Generates a new Keypair using, and returns the public key representative
@@ -52,14 +52,15 @@ fn pubkey_subgroup_check() {
             let y_sk = thread_rng().gen::<[u8; 32]>();
             let y_sk_tweak = thread_rng().gen::<u8>();
 
-            let y_repr_bytes = match representative_from_privkey(&y_sk, y_sk_tweak) {
+            let y_repr_bytes = match Randomized::to_representative(&y_sk, y_sk_tweak).into() {
                 Some(r) => r,
                 None => continue,
             };
-            let y_pk = EdwardsPoint::mul_base_clamped_dirty(y_sk);
+            let y_pk = Randomized::mul_base_clamped(y_sk);
 
             assert_eq!(
-                MontgomeryPoint::map_to_point(&y_repr_bytes),
+                MontgomeryPoint::from_representative::<Randomized>(&y_repr_bytes)
+                    .expect("failed to re-derive point from representative"),
                 y_pk.to_montgomery()
             );
 
@@ -98,7 +99,7 @@ fn pubkey_subgroup_check() {
         let v = scalar_mult_order(&pk);
 
         let b = v.compress().to_bytes();
-        let b_str = hex::encode(&b);
+        let b_str = hex::encode(b);
         let index = match low_order_points.iter().position(|x| x == &b_str) {
             Some(idx) => idx,
             None => {
@@ -120,8 +121,7 @@ fn pubkey_subgroup_check() {
         }
     }
     let mut failed = false;
-    for (i, count) in counts.iter().enumerate() {
-        println!("{} {}", low_order_points[i], count);
+    for count in counts.iter() {
         if *count == 0 {
             failed = true;
         }
