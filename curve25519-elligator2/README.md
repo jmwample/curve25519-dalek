@@ -11,16 +11,10 @@ use in the interim period. As such, this crate:
 
 # Use
 
-To import `curve25519-dalek`, add the following to the dependencies section of
+To import `curve25519-elligator2`, add the following to the dependencies section of
 your project's `Cargo.toml`:
 ```toml
-curve25519-elligator2 = "4"
-```
-
-If opting into [SemVer-exempted features](#public-api-semver-exemptions) a range
-can be used to scope the tested compatible version range e.g.:
-```toml
-curve25519-elligator2 = ">= 4.0, < 4.2"
+curve25519-elligator2 = "0.1.0-alpha.1"
 ```
 
 
