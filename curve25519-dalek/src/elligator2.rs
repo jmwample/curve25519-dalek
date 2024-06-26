@@ -7,7 +7,7 @@
 //!
 //! ```rust ignore
 //! use rand::RngCore;
-//! use curve25519_dalek::{RFC9380, MapToPointVariant};
+//! use curve25519_dalek::elligator2::{RFC9380, MapToPointVariant};
 //!
 //! type A = RFC9380;
 //!
@@ -35,7 +35,7 @@
 //!
 //! ```rust
 //! use rand::RngCore;
-//! use curve25519_dalek::{RFC9380, Randomized, MapToPointVariant, MontgomeryPoint, EdwardsPoint};
+//! use curve25519_dalek::{MontgomeryPoint, EdwardsPoint, elligator2::{RFC9380, Randomized, MapToPointVariant}};
 //!
 //! // Montgomery Points can be mapped to and from elligator representatives
 //! // using any algorithm variant.
@@ -61,7 +61,7 @@
 //!
 //! ```rust
 //! use rand::{RngCore, CryptoRng};
-//! use curve25519_dalek::{MapToPointVariant, Randomized};
+//! use curve25519_dalek::elligator2::{MapToPointVariant, Randomized};
 //!
 //! type A = Randomized;
 //! const RETRY_LIMIT: usize = 64;
