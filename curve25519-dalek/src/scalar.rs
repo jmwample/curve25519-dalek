@@ -123,7 +123,7 @@ use core::ops::{Sub, SubAssign};
 use cfg_if::cfg_if;
 
 #[cfg(feature = "group")]
-use group::ff::{Field, FromUniformBytes, PrimeField};
+use group::ff::{Field, FromUniformBytes, PrimeField, helpers::{sqrt_tonelli_shanks, sqrt_ratio_generic}};
 #[cfg(feature = "group-bits")]
 use group::ff::{FieldBits, PrimeFieldBits};
 
