@@ -14,7 +14,7 @@ use in the interim period. As such, this crate:
 To import `curve25519-elligator2`, add the following to the dependencies section of
 your project's `Cargo.toml`:
 ```toml
-curve25519-elligator2 = "0.1.0-alpha.1"
+curve25519-elligator2 = "0.1.0-alpha.2"
 ```
 
 
