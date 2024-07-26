@@ -1,14 +1,13 @@
 use super::*;
-use crate::{MontgomeryPoint, traits::IsIdentity};
 use crate::scalar::test::BASEPOINT_ORDER_MINUS_ONE;
+use crate::{traits::IsIdentity, MontgomeryPoint};
 
 use rand::Rng;
 use rand_core::{CryptoRng, RngCore};
 
-
 // Generates a new Keypair using, and returns the public key representative
 // along, with its public key as a newly allocated edwards25519.Point.
-fn generate<R:RngCore+CryptoRng>(rng: &mut R) -> ([u8; 32], EdwardsPoint) {
+fn generate<R: RngCore + CryptoRng>(rng: &mut R) -> ([u8; 32], EdwardsPoint) {
     for _ in 0..63 {
         let y_sk = rng.gen::<[u8; 32]>();
         let y_sk_tweak = rng.next_u32() as u8;
@@ -35,11 +34,10 @@ fn generate<R:RngCore+CryptoRng>(rng: &mut R) -> ([u8; 32], EdwardsPoint) {
 /// BASEPOINT_ORDER_MINUS_ONE is the same as scMinusOne in filippo.io/edwards25519.
 /// https://github.com/FiloSottile/edwards25519/blob/v1.0.0/scalar.go#L34
 fn scalar_mult_order(v: &EdwardsPoint) -> EdwardsPoint {
-        // v * (L - 1) + v => v * L
-        let p = v * BASEPOINT_ORDER_MINUS_ONE;
-        p + v
+    // v * (L - 1) + v => v * L
+    let p = v * BASEPOINT_ORDER_MINUS_ONE;
+    p + v
 }
-
 
 #[test]
 #[cfg(feature = "elligator2")]
@@ -143,21 +141,23 @@ fn off_subgroup_check_edw() {
         let v = scalar_mult_order(&pk);
         let pk_off = !v.is_identity();
 
-        // --- 
+        // ---
 
         // check if the public key derived from the representative (top bit 0)
         // is off the subgroup
-        let mut yr_255 = repr.clone();
+        let mut yr_255 = repr;
         yr_255[31] &= 0xbf;
-        let pk_255 = EdwardsPoint::from_representative::<RFC9380>(&yr_255).expect("from_repr_255, should never fail");
+        let pk_255 = EdwardsPoint::from_representative::<RFC9380>(&yr_255)
+            .expect("from_repr_255, should never fail");
         let v = scalar_mult_order(&pk_255);
         let off_255 = !v.is_identity();
 
         // check if the public key derived from the representative (top two bits 0 - as
         // our representatives are) is off the subgroup.
-        let mut yr_254 = repr.clone();
+        let mut yr_254 = repr;
         yr_254[31] &= 0x3f;
-        let pk_254 = EdwardsPoint::from_representative::<RFC9380>(&yr_254).expect("from_repr_254, should never fail");
+        let pk_254 = EdwardsPoint::from_representative::<RFC9380>(&yr_254)
+            .expect("from_repr_254, should never fail");
         let v = scalar_mult_order(&pk_254);
         let off_254 = !v.is_identity();
 
@@ -174,7 +174,7 @@ fn check(pk: MontgomeryPoint) -> bool {
 
 /// check a point in the group, assuming it is a representative and given a
 /// variant by which to convert it to a point.
-fn check_r<V:MapToPointVariant>(r: [u8;32]) -> bool {
+fn check_r<V: MapToPointVariant>(r: [u8; 32]) -> bool {
     let pk = MontgomeryPoint::from_representative::<V>(&r).expect("from_representative failed");
     check(pk)
 }
@@ -223,14 +223,12 @@ fn off_subgroup_check_custom() {
     }
 }
 
-
 /// Direct elligator map translate as accurately as possible from `obfs4-subgroup-check.py`.
-fn elligator_dir_map(rb: [u8;32]) -> (FieldElement, FieldElement) {
+fn elligator_dir_map(rb: [u8; 32]) -> (FieldElement, FieldElement) {
     let r = FieldElement::from_bytes(&rb);
     let two = &FieldElement::ONE + &FieldElement::ONE;
-    let ufactor = &-&two * &SQRT_M1; 
+    let ufactor = &-&two * &SQRT_M1;
     let (_, vfactor) = FieldElement::sqrt_ratio_i(&ufactor, &FieldElement::ONE);
-
 
     let u = r.square();
     let t1 = r.square2();
@@ -254,7 +252,7 @@ fn elligator_dir_map(rb: [u8;32]) -> (FieldElement, FieldElement) {
     let u = &u * &t3;
     let u = &u * &t2;
     let u = &u * &t1;
-    let t1  = -&v;
-    let v =  FieldElement::conditional_select(&v, &t1, is_sq ^ v.is_negative());
+    let t1 = -&v;
+    let v = FieldElement::conditional_select(&v, &t1, is_sq ^ v.is_negative());
     (u, v)
 }
