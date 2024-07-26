@@ -1,7 +1,45 @@
 use super::*;
-use crate::{MontgomeryPoint, Scalar};
+use crate::{MontgomeryPoint, traits::IsIdentity};
+use crate::scalar::test::BASEPOINT_ORDER_MINUS_ONE;
 
-use rand::{thread_rng, Rng};
+use rand::Rng;
+use rand_core::{CryptoRng, RngCore};
+
+
+// Generates a new Keypair using, and returns the public key representative
+// along, with its public key as a newly allocated edwards25519.Point.
+fn generate<R:RngCore+CryptoRng>(rng: &mut R) -> ([u8; 32], EdwardsPoint) {
+    for _ in 0..63 {
+        let y_sk = rng.gen::<[u8; 32]>();
+        let y_sk_tweak = rng.next_u32() as u8;
+
+        let y_repr_bytes = match Randomized::to_representative(&y_sk, y_sk_tweak).into() {
+            Some(r) => r,
+            None => continue,
+        };
+        let y_pk = Randomized::mul_base_clamped(y_sk);
+
+        assert_eq!(
+            MontgomeryPoint::from_representative::<Randomized>(&y_repr_bytes)
+                .expect("failed to re-derive point from representative"),
+            y_pk.to_montgomery()
+        );
+
+        return (y_repr_bytes, y_pk);
+    }
+    panic!("failed to generate a valid keypair");
+}
+
+/// Returns a new edwards25519.Point that is v multiplied by the subgroup order.
+///
+/// BASEPOINT_ORDER_MINUS_ONE is the same as scMinusOne in filippo.io/edwards25519.
+/// https://github.com/FiloSottile/edwards25519/blob/v1.0.0/scalar.go#L34
+fn scalar_mult_order(v: &EdwardsPoint) -> EdwardsPoint {
+        // v * (L - 1) + v => v * L
+        let p = v * BASEPOINT_ORDER_MINUS_ONE;
+        p + v
+}
+
 
 #[test]
 #[cfg(feature = "elligator2")]
@@ -30,45 +68,6 @@ use rand::{thread_rng, Rng};
 // work around this by multiplying the point by L - 1, then adding the
 // point once to the product.
 fn pubkey_subgroup_check() {
-    // This is the same as scMinusOne in filippo.io/edwards25519.
-    // https://github.com/FiloSottile/edwards25519/blob/v1.0.0/scalar.go#L34
-    let scalar_order_minus1 = Scalar::from_canonical_bytes([
-        236_u8, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
-    ])
-    .unwrap();
-
-    // Returns a new edwards25519.Point that is v multiplied by the subgroup order.
-    let scalar_mult_order = |v: &EdwardsPoint| -> EdwardsPoint {
-        // v * (L - 1) + v => v * L
-        let p = v * scalar_order_minus1;
-        p + v
-    };
-
-    // Generates a new Keypair using, and returns the public key representative
-    // along, with its public key as a newly allocated edwards25519.Point.
-    let generate = || -> ([u8; 32], EdwardsPoint) {
-        for _ in 0..63 {
-            let y_sk = thread_rng().gen::<[u8; 32]>();
-            let y_sk_tweak = thread_rng().gen::<u8>();
-
-            let y_repr_bytes = match Randomized::to_representative(&y_sk, y_sk_tweak).into() {
-                Some(r) => r,
-                None => continue,
-            };
-            let y_pk = Randomized::mul_base_clamped(y_sk);
-
-            assert_eq!(
-                MontgomeryPoint::from_representative::<Randomized>(&y_repr_bytes)
-                    .expect("failed to re-derive point from representative"),
-                y_pk.to_montgomery()
-            );
-
-            return (y_repr_bytes, y_pk);
-        }
-        panic!("failed to generate a valid keypair");
-    };
-
     // These are all the points of low order that may result from
     // multiplying an Elligator-mapped point by L. We will test that all of
     // them are covered.
@@ -94,8 +93,10 @@ fn pubkey_subgroup_check() {
     // and break the loop when it reaches 8, so when representatives are
     // actually uniform we will usually run much fewer iterations.
     let mut num_covered = 0;
+
+    let mut rng = rand::thread_rng();
     for _ in 0..255 {
-        let (repr, pk) = generate();
+        let (repr, pk) = generate(&mut rng);
         let v = scalar_mult_order(&pk);
 
         let b = v.compress().to_bytes();
@@ -130,4 +131,130 @@ fn pubkey_subgroup_check() {
     if failed {
         panic!("not all low order points were covered")
     }
+}
+
+#[test]
+fn off_subgroup_check_edw() {
+    let mut rng = rand::thread_rng();
+    for _ in 0..100 {
+        let (repr, pk) = generate(&mut rng);
+
+        // check if the generated public key is off the subgroup
+        let v = scalar_mult_order(&pk);
+        let pk_off = !v.is_identity();
+
+        // --- 
+
+        // check if the public key derived from the representative (top bit 0)
+        // is off the subgroup
+        let mut yr_255 = repr.clone();
+        yr_255[31] &= 0xbf;
+        let pk_255 = EdwardsPoint::from_representative::<RFC9380>(&yr_255).expect("from_repr_255, should never fail");
+        let v = scalar_mult_order(&pk_255);
+        let off_255 = !v.is_identity();
+
+        // check if the public key derived from the representative (top two bits 0 - as
+        // our representatives are) is off the subgroup.
+        let mut yr_254 = repr.clone();
+        yr_254[31] &= 0x3f;
+        let pk_254 = EdwardsPoint::from_representative::<RFC9380>(&yr_254).expect("from_repr_254, should never fail");
+        let v = scalar_mult_order(&pk_254);
+        let off_254 = !v.is_identity();
+
+        println!("pk_gen: {pk_off}, pk_255: {off_255}, pk_254: {off_254}");
+    }
+}
+
+use crate::constants::BASEPOINT_ORDER_PRIVATE;
+
+fn check(pk: MontgomeryPoint) -> bool {
+    let z = pk * BASEPOINT_ORDER_PRIVATE;
+    !z.is_identity()
+}
+
+/// check a point in the group, assuming it is a representative and given a
+/// variant by which to convert it to a point.
+fn check_r<V:MapToPointVariant>(r: [u8;32]) -> bool {
+    let pk = MontgomeryPoint::from_representative::<V>(&r).expect("from_representative failed");
+    check(pk)
+}
+
+#[test]
+/// Somehow there should be a montgomery distinguisher where all real representatives
+/// map to the curve subgroup. For our keys this should only (consistently) happen
+/// for representatives with the top two bits cleared (i.e. 254 but representatives).
+fn off_subgroup_check_mgt() {
+    let mut rng = rand::thread_rng();
+
+    for _ in 0..100 {
+        let (mut repr, pk) = generate(&mut rng);
+        repr[31] &= MASK_UNSET_BYTE;
+
+        let off_pk = check(pk.to_montgomery());
+
+        let off_rfc = check_r::<RFC9380>(repr);
+
+        let off_rand = check_r::<Randomized>(repr);
+
+        let (u, _v) = elligator_dir_map(repr);
+        let u = MontgomeryPoint(u.as_bytes());
+        let off = check(u);
+
+        println!("pk: {off_pk},\trfc: {off_rfc},\trand: {off_rand},\tcust: {off}");
+    }
+}
+
+#[test]
+/// Somehow there should be a montgomery distinguisher where all real representatives
+/// map to the curve subgroup. For our keys this should only (consistently) happen
+/// for representatives with the top two bits cleared (i.e. 254 but representatives).
+fn off_subgroup_check_custom() {
+    let mut rng = rand::thread_rng();
+
+    for _ in 0..100 {
+        let (mut repr, _) = generate(&mut rng);
+        repr[31] &= MASK_UNSET_BYTE;
+
+        let (u, _v) = elligator_dir_map(repr);
+        let u = MontgomeryPoint(u.as_bytes());
+        let off = check(u);
+
+        println!("custom: {off}");
+    }
+}
+
+
+/// Direct elligator map translate as accurately as possible from `obfs4-subgroup-check.py`.
+fn elligator_dir_map(rb: [u8;32]) -> (FieldElement, FieldElement) {
+    let r = FieldElement::from_bytes(&rb);
+    let two = &FieldElement::ONE + &FieldElement::ONE;
+    let ufactor = &-&two * &SQRT_M1; 
+    let (_, vfactor) = FieldElement::sqrt_ratio_i(&ufactor, &FieldElement::ONE);
+
+
+    let u = r.square();
+    let t1 = r.square2();
+    let v = &t1 + &FieldElement::ONE;
+    let t2 = v.square();
+    let t3 = MONTGOMERY_A.square();
+    let t3 = &t3 * &t1;
+    let t3 = &t3 - &t2;
+    let t3 = &t3 * &MONTGOMERY_A;
+    let t1 = &t2 * &v;
+
+    let (is_sq, t1) = FieldElement::sqrt_ratio_i(&FieldElement::ONE, &(&t3 * &t1));
+    let u = &u * &ufactor;
+    let v = &r * &vfactor;
+    let u = FieldElement::conditional_select(&u, &FieldElement::ONE, is_sq);
+    let v = FieldElement::conditional_select(&v, &FieldElement::ONE, is_sq);
+    let v = &v * &t3;
+    let v = &v * &t1;
+    let t1 = t1.square();
+    let u = &u * &-&MONTGOMERY_A;
+    let u = &u * &t3;
+    let u = &u * &t2;
+    let u = &u * &t1;
+    let t1  = -&v;
+    let v =  FieldElement::conditional_select(&v, &t1, is_sq ^ v.is_negative());
+    (u, v)
 }
