@@ -260,7 +260,6 @@ impl FieldElement51 {
         output
     }
 
-
     /// Returns 1 if self is greater than the other and 0 otherwise
     // strategy: check if b-a overflows. if it does not overflow, then a was larger
     pub(crate) fn gt_direct(&self, other: &Self) -> Choice {
@@ -274,13 +273,13 @@ impl FieldElement51 {
 
         // start from least significant go to most significant
         for i in 0..5 {
-             _ul = self.0[i];
-             _vl = other.0[i];
+            _ul = self.0[i];
+            _vl = other.0[i];
 
-             gt_i = _ul > _vl;
-             eq_i =  _ul == _vl;
+            gt_i = _ul > _vl;
+            eq_i = _ul == _vl;
 
-             c_gt = gt_i ||  (eq_i & c_gt);
+            c_gt = gt_i || (eq_i & c_gt);
         }
 
         Choice::from(c_gt as u8)
