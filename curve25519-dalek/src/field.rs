@@ -313,10 +313,9 @@ impl ConstantTimeGreater for FieldElement {
     /// If self > other return Choice(1), otherwise return Choice(0)
     ///
     fn ct_gt(&self, other: &FieldElement) -> Choice {
-
-        // One possible failure for is if self.or other falls in 0..18
+        // One possible failure for is if self or other falls in 0..18
         // as s+p in 2^255-19..2^255-1.  We can check this by
-        // converting to bytes and then back to FieldElement, 
+        // converting to bytes and then back to FieldElement,
         // since our encoding routine is canonical the returned value
         // will always be compared properly.
         let a = FieldElement::from_bytes(&self.as_bytes());
@@ -520,11 +519,13 @@ mod test {
         // 2^255 - 1 = 18
         let low_high_val = <[u8; 32]>::from_hex(
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        ).expect("should never fail");
+        )
+        .expect("should never fail");
         // 32
         let higher_low_val = <[u8; 32]>::from_hex(
             "0000000000000000000000000000000000000000000000000000000000000020",
-        ).expect("should never fail");
+        )
+        .expect("should never fail");
 
         let cases = [
             (FieldElement::ONE, FieldElement::ZERO, true),
