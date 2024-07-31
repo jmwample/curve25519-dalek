@@ -313,13 +313,22 @@ impl ConstantTimeGreater for FieldElement {
     /// If self > other return Choice(1), otherwise return Choice(0)
     ///
     fn ct_gt(&self, other: &FieldElement) -> Choice {
-        self.gt(other)
+        // One possible failure for is if self or other falls in 0..18
+        // as s+p in 2^255-19..2^255-1.  We can check this by
+        // converting to bytes and then back to FieldElement,
+        // since our encoding routine is canonical the returned value
+        // will always be compared properly.
+        let a = FieldElement::from_bytes(&self.as_bytes());
+        let b = FieldElement::from_bytes(&other.as_bytes());
+
+        a.gt_direct(&b)
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::field::*;
+    use hex::FromHex;
 
     /// Random element a of GF(2^255-19), from Sage
     /// a = 1070314506888354081329385823235218444233221\
@@ -503,5 +512,40 @@ mod test {
     #[cfg(feature = "alloc")]
     fn batch_invert_empty() {
         FieldElement::batch_invert(&mut []);
+    }
+
+    #[test]
+    fn greater_than() {
+        // 2^255 - 1 = 18
+        let low_high_val = <[u8; 32]>::from_hex(
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        )
+        .expect("should never fail");
+        // 32
+        let higher_low_val = <[u8; 32]>::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000020",
+        )
+        .expect("should never fail");
+
+        let cases = [
+            (FieldElement::ONE, FieldElement::ZERO, true),
+            (FieldElement::ZERO, FieldElement::ONE, false),
+            (FieldElement::ONE, FieldElement::ONE, false),
+            (
+                FieldElement::from_bytes(&higher_low_val),
+                FieldElement::from_bytes(&low_high_val),
+                true,
+            ),
+            (
+                FieldElement::from_bytes(&low_high_val),
+                FieldElement::from_bytes(&higher_low_val),
+                false,
+            ),
+        ];
+
+        for (i, (a, b, expected)) in cases.into_iter().enumerate() {
+            let actual: bool = a.ct_gt(&b).into();
+            assert_eq!(expected, actual, "failed case ({i}) {actual}");
+        }
     }
 }
