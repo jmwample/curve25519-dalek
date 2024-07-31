@@ -231,6 +231,9 @@ impl MapToPointVariant for Randomized {
 }
 
 #[cfg(feature = "digest")]
+/// In general this mode should **NEVER** be used unless there is a very specific
+/// reason to do so as it has multiple serious known flaws.
+///
 /// Converts between a point on elliptic curve E (Curve25519) and an element of
 /// the finite field F over which E is defined. Supports older implementations
 /// with a common implementation bug (Signal, Kleshni-C).
@@ -243,9 +246,6 @@ impl MapToPointVariant for Randomized {
 /// resulting point will be different for inputs with either of the
 /// high-order two bits set. The kleshni C and Signal implementations are examples
 /// of libraries that don't always use the least square root.
-///
-/// In general this mode should NOT be used unless there is a very specific
-/// reason to do so.
 ///
 // We return the LSR for to_representative values. This is here purely for testing
 // compatability and ensuring that we understand the subtle differences that can
@@ -266,10 +266,28 @@ impl MapToPointVariant for Legacy {
         CtOption::new(point, Choice::from(1))
     }
 
+    // There is a bug in the kleshni implementation where it
+    // takes a sortcut when computng greater than for field elemements.
+    // For the purpose of making tests pass matching the bugged implementation
+    // I am adding the bug here intentionally. Legacy is not exposed and
+    // should not be exposed as it is obviously flawed in multiple ways.
+    //
+    // What we want is:
+    //      If root - (p - 1) / 2 < 0, root := -root
+    // This is not equivalent to:
+    //      if root > (p - 1)/2 root := -root
+    //
     fn to_representative(point: &[u8; 32], _tweak: u8) -> CtOption<[u8; 32]> {
         let pubkey = EdwardsPoint::mul_base_clamped(*point);
         let v_in_sqrt = v_in_sqrt_pubkey_edwards(&pubkey);
+
         point_to_representative(&MontgomeryPoint(*point), v_in_sqrt.into())
+
+        // let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
+        // let did_negate = divide_minus_p_1_2.ct_gt(&b);
+        // let should_negate = Self::gt(&b, &divide_minus_p_1_2);
+        // FieldElement::conditional_negate(&mut b, did_negate ^ should_negate);
+        // CtOption::new(b.as_bytes(), c)
     }
 }
 
@@ -583,7 +601,8 @@ pub(crate) fn point_to_representative(
     let mut b = FieldElement::conditional_select(&r1, &r0, Choice::from(v_in_sqrt as u8));
 
     // If root > (p - 1) / 2, root := -root
-    let negate = divide_minus_p_1_2.ct_gt(&b);
+    // let negate = divide_minus_p_1_2.ct_gt(&b);
+    let negate = divide_minus_p_1_2.mpn_sub_n(&b);
     FieldElement::conditional_negate(&mut b, negate);
 
     CtOption::new(b.as_bytes(), is_encodable)
@@ -677,7 +696,9 @@ pub(crate) fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
     let v = &(&t0 * &inv1) * &(&pubkey.Z * &sqrt_minus_a_plus_2);
 
     // is   v <= (q-1)/2  ?
-    divide_minus_p_1_2.ct_gt(&v)
+    // divide_minus_p_1_2.ct_gt(&v)
+    // v.is_negative()
+    divide_minus_p_1_2.mpn_sub_n(&v)
 }
 
 // ============================================================================
