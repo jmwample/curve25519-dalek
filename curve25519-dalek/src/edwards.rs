@@ -588,7 +588,7 @@ impl EdwardsPoint {
     where
         D: Digest<OutputSize = U64> + Default,
     {
-        use crate::elligator2::Legacy;
+        use crate::elligator2::RFC9380;
 
         let mut hash = D::new();
         hash.update(bytes);
@@ -601,7 +601,7 @@ impl EdwardsPoint {
         // rfc9380 should always result in a valid point since no field elements
         // are invalid. so unwrap should be safe.
         #[allow(clippy::unwrap_used)]
-        let fe1 = MontgomeryPoint::from_representative::<Legacy>(&res).unwrap();
+        let fe1 = MontgomeryPoint::from_representative::<RFC9380>(&res).unwrap();
         let E1_opt = fe1.to_edwards(sign_bit);
 
         E1_opt

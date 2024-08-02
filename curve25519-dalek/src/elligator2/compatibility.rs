@@ -1,10 +1,22 @@
 use super::*;
-
 use hex::FromHex;
 
 ////////////////////////////////////////////////////////////
 // Ntor tests                                             //
 ////////////////////////////////////////////////////////////
+
+
+#[test]
+#[cfg(feature = "elligator2")]
+fn ident_is_representable() {
+    let m = MontgomeryPoint::default();
+    let repres = m.to_representative::<RFC9380>(0u8).expect("should succeed, I think");
+    let pubkey = RFC9380::mul_base_clamped(m.to_bytes()).to_montgomery();
+
+    // let orig = MontgomeryPoint::from_representative::<RFC9380>(&out).expect("should prob also work");
+    let orig = MontgomeryPoint::map_to_point(&repres);
+    assert_eq!(&pubkey, &orig);
+}
 
 #[test]
 #[cfg(feature = "elligator2")]
