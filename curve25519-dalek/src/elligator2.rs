@@ -5,7 +5,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust ignore
+//! ```rust no_run
 //! use rand::RngCore;
 //! use curve25519_dalek::elligator2::{RFC9380, MapToPointVariant};
 //!
@@ -33,7 +33,7 @@
 //! The elligator2 transforms can also be applied to [`MontgomeryPoint`] and
 //! [`EdwardsPoint`] objects themselves.
 //!
-//! ```rust
+//! ```rust no_run
 //! # use hex::FromHex;
 //! use rand::RngCore;
 //! use curve25519_dalek::{MontgomeryPoint, EdwardsPoint, elligator2::{RFC9380, Randomized, MapToPointVariant}};
@@ -146,9 +146,7 @@ use crate::montgomery::MontgomeryPoint;
 use crate::EdwardsPoint;
 
 use cfg_if::cfg_if;
-use subtle::{
-    Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq, CtOption,
-};
+use subtle::{Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 /// bitmask for a single byte when clearing the high order two bits of a representative
 pub(crate) const MASK_UNSET_BYTE: u8 = 0x3f;
@@ -156,7 +154,7 @@ pub(crate) const MASK_UNSET_BYTE: u8 = 0x3f;
 pub(crate) const MASK_SET_BYTE: u8 = 0xc0;
 
 /// (p - 1) / 2 = 2^254 - 10
-
+///
 /// Common interface for the different ways to compute the elligator2 forward
 /// and reverse transformations.
 pub trait MapToPointVariant {

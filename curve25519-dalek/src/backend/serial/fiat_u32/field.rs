@@ -268,29 +268,4 @@ impl FieldElement2625 {
         fiat_25519_carry(&mut output.0, &output_loose);
         output
     }
-
-    /// Returns 1 if self is greater than the other and 0 otherwise
-    // strategy: check if b-a overflows. if it does not overflow, then a was larger
-    pub(crate) fn gt_direct(&self, other: &Self) -> Choice {
-        let mut _ul = 0_u32;
-        let mut _vl = 0_u32;
-
-        // carry through gt
-        let mut c_gt = false;
-        let mut gt_i: bool;
-        let mut eq_i: bool;
-
-        // start from least significant go to most significant
-        for i in 0..10 {
-            _ul = self.0[i];
-            _vl = other.0[i];
-
-            gt_i = _ul > _vl;
-            eq_i = _ul == _vl;
-
-            c_gt = gt_i || (eq_i & c_gt);
-        }
-
-        Choice::from(c_gt as u8)
-    }
 }
