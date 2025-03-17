@@ -30,7 +30,7 @@ use cfg_if::cfg_if;
 use subtle::Choice;
 use subtle::ConditionallyNegatable;
 use subtle::ConditionallySelectable;
-use subtle::{ConstantTimeEq, ConstantTimeGreater};
+use subtle::ConstantTimeEq;
 
 use crate::backend;
 use crate::constants;
@@ -302,18 +302,6 @@ impl FieldElement {
     ///
     pub(crate) fn invsqrt(&self) -> (Choice, FieldElement) {
         FieldElement::sqrt_ratio_i(&FieldElement::ONE, self)
-    }
-}
-
-impl ConstantTimeGreater for FieldElement {
-    /// Test equality between two `FieldElement`s.  Since the
-    /// internal representation is not canonical, the field elements
-    /// are normalized to wire format before comparison.
-    ///
-    /// If self > other return Choice(1), otherwise return Choice(0)
-    ///
-    fn ct_gt(&self, other: &FieldElement) -> Choice {
-        self.gt(other)
     }
 }
 

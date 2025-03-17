@@ -588,7 +588,7 @@ impl EdwardsPoint {
     where
         D: Digest<OutputSize = U64> + Default,
     {
-        use crate::elligator2::Legacy;
+        use crate::elligator2::RFC9380;
 
         let mut hash = D::new();
         hash.update(bytes);
@@ -601,7 +601,7 @@ impl EdwardsPoint {
         // rfc9380 should always result in a valid point since no field elements
         // are invalid. so unwrap should be safe.
         #[allow(clippy::unwrap_used)]
-        let fe1 = MontgomeryPoint::from_representative::<Legacy>(&res).unwrap();
+        let fe1 = MontgomeryPoint::from_representative::<RFC9380>(&res).unwrap();
         let E1_opt = fe1.to_edwards(sign_bit);
 
         E1_opt
@@ -2276,17 +2276,29 @@ mod test {
                 "f06fc939bc10551a0fd415aebf107ef0b9c4ee1ef9a164157bdd089127782617",
                 "785b2a6a00a5579cc9da1ff997ce8339b6f9fb46c6f10cf7a12ff2986341a6e0",
             ],
-            // Non Least-Square-Root representative values. (i.e. representative > 2^254-10 )
+        ]
+    }
+
+    #[cfg(all(feature = "alloc", feature = "digest"))]
+    fn test_vectors_non_lsr() -> Vec<Vec<&'static str>> {
+        // Non Least-Square-Root representative values. (i.e. representative > 2^254-10 )
+        vec![
             vec![
+                // input
                 "84cbe9accdd32b46f4a8ef51c85fd39d028711f77fb00e204a613fc235fd68b9",
+                // output
+                "aaa72cb973e1a958646d3b11a0d7b03642972ac4306361e137eddf2dd1e935a6",
+                // non-least square representative (i.e. legacy implementation) here for reference
                 "93c73e0289afd1d1fc9e4e78a505d5d1b2642fbdf91a1eff7d281930654b1453",
             ],
             vec![
                 "48b73039db6fcdcb6030c4a38e8be80b6390d8ae46890e77e623f87254ef149c",
+                "80c8813513cd260d5438188f17d5490b5052b465b259d6741ae36b9e137d9d24",
                 "ca11b25acbc80566603eabeb9364ebd50e0306424c61049e1ce9385d9f349966",
             ],
             vec![
                 "80a6ff33494c471c5eff7efb9febfbcf30a946fe6535b3451cda79f2154a7095",
+                "027edfc3be233b12ccfe57be905ec1cc1af97dcd5543e6d49f8f4d74a2dc4324",
                 "57ac03913309b3f8cd3c3d4c49d878bb21f4d97dc74a1eaccbe5c601f7f06f47",
             ],
         ]
@@ -2297,6 +2309,18 @@ mod test {
     #[cfg(all(feature = "alloc", feature = "digest"))]
     fn elligator_signal_test_vectors() {
         for (n, vector) in test_vectors().iter().enumerate() {
+            let input = hex::decode(vector[0]).expect("failed to decode hex input");
+            let output = hex::decode(vector[1]).expect("failed to decode hex output");
+
+            let point = EdwardsPoint::nonspec_map_to_curve::<sha2::Sha512>(&input);
+            assert_eq!(
+                hex::encode(point.compress().to_bytes()),
+                hex::encode(&output[..]),
+                "signal map_to_curve failed for test {n}"
+            );
+        }
+
+        for (n, vector) in test_vectors_non_lsr().iter().enumerate() {
             let input = hex::decode(vector[0]).expect("failed to decode hex input");
             let output = hex::decode(vector[1]).expect("failed to decode hex output");
 

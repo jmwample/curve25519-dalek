@@ -5,7 +5,7 @@
 //!
 //! ## Usage
 //!
-//! ```rust ignore
+//! ```rust no_run
 //! use rand::RngCore;
 //! use curve25519_dalek::elligator2::{RFC9380, MapToPointVariant};
 //!
@@ -33,23 +33,39 @@
 //! The elligator2 transforms can also be applied to [`MontgomeryPoint`] and
 //! [`EdwardsPoint`] objects themselves.
 //!
-//! ```rust
+//! ```rust no_run
+//! # use hex::FromHex;
 //! use rand::RngCore;
 //! use curve25519_dalek::{MontgomeryPoint, EdwardsPoint, elligator2::{RFC9380, Randomized, MapToPointVariant}};
 //!
 //! // Montgomery Points can be mapped to and from elligator representatives
 //! // using any algorithm variant.
 //! let tweak = rand::thread_rng().next_u32() as u8;
-//! let mont_point = MontgomeryPoint::default(); // example point known to be representable
+//! let mont_point = MontgomeryPoint::default(); // example private key point known to be representable
 //! let r = mont_point.to_representative::<RFC9380>(tweak).unwrap();
+//! let pubkey = RFC9380::mul_base_clamped(mont_point.to_bytes()).to_montgomery();
 //!
-//! _ = MontgomeryPoint::from_representative::<RFC9380>(&r).unwrap();
+//! let derived_pubkey = MontgomeryPoint::from_representative::<RFC9380>(&r).unwrap();
+//! assert_eq!(pubkey, derived_pubkey);
 //!
-//! // Edwards Points can be transformed as well.
+//! // Points in byte format can be transformed
+//!
+//! // (example known representable point)
+//! let mut point = <[u8;32]>::from_hex("00deadbeef00deadbeef00deadbeef00deadbeef00deadbeef00deadbeef0124").unwrap();
+//! let tweak = rand::thread_rng().next_u32() as u8;
+//! let r = RFC9380::to_representative(&point, tweak).unwrap();
+//! let pubkey = RFC9380::mul_base_clamped(point).to_montgomery();
+//!
+//! let derived_pubkey = MontgomeryPoint::from_representative::<RFC9380>(&r).unwrap();
+//! assert_eq!(pubkey, derived_pubkey);
+//!
+//! // Edwards Points can be transformed as well. This example uses the Randomized variant.
 //! let edw_point = EdwardsPoint::default(); // example point known to be representable
 //! let r = edw_point.to_representative::<Randomized>(tweak).unwrap();
+//! let pubkey = Randomized::mul_base_clamped(edw_point.to_montgomery().to_bytes());
 //!
-//! _ = EdwardsPoint::from_representative::<Randomized>(&r).unwrap();
+//! let derived_pubkey = EdwardsPoint::from_representative::<Randomized>(&r).unwrap();
+//! assert_eq!(pubkey, derived_pubkey);
 //! ```
 //!
 //! ### Generating Representable Points.
@@ -130,10 +146,7 @@ use crate::montgomery::MontgomeryPoint;
 use crate::EdwardsPoint;
 
 use cfg_if::cfg_if;
-use subtle::{
-    Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater,
-    CtOption,
-};
+use subtle::{Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq, CtOption};
 
 /// bitmask for a single byte when clearing the high order two bits of a representative
 pub(crate) const MASK_UNSET_BYTE: u8 = 0x3f;
@@ -141,11 +154,7 @@ pub(crate) const MASK_UNSET_BYTE: u8 = 0x3f;
 pub(crate) const MASK_SET_BYTE: u8 = 0xc0;
 
 /// (p - 1) / 2 = 2^254 - 10
-pub(crate) const DIVIDE_MINUS_P_1_2_BYTES: [u8; 32] = [
-    0xf6, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x3f,
-];
-
+///
 /// Common interface for the different ways to compute the elligator2 forward
 /// and reverse transformations.
 pub trait MapToPointVariant {
@@ -227,49 +236,6 @@ impl MapToPointVariant for Randomized {
 
     fn mul_base_clamped(bytes: [u8; 32]) -> EdwardsPoint {
         EdwardsPoint::mul_base_clamped_dirty(bytes)
-    }
-}
-
-#[cfg(feature = "digest")]
-/// Converts between a point on elliptic curve E (Curve25519) and an element of
-/// the finite field F over which E is defined. Supports older implementations
-/// with a common implementation bug (Signal, Kleshni-C).
-///
-/// In contrast to the [`RFC9380`] variant, `Legacy` does NOT assume that input values are always
-/// going to be the least-square-root representation of the field element.
-/// This is divergent from the specifications for both elligator2 and RFC 9380,
-/// however, some older implementations miss this detail. This allows us to be
-/// compatible with those alternate implementations if necessary, since the
-/// resulting point will be different for inputs with either of the
-/// high-order two bits set. The kleshni C and Signal implementations are examples
-/// of libraries that don't always use the least square root.
-///
-/// In general this mode should NOT be used unless there is a very specific
-/// reason to do so.
-///
-// We return the LSR for to_representative values. This is here purely for testing
-// compatability and ensuring that we understand the subtle differences that can
-// influence proper implementation.
-pub struct Legacy;
-
-#[cfg(feature = "digest")]
-impl MapToPointVariant for Legacy {
-    fn from_representative(representative: &[u8; 32]) -> CtOption<EdwardsPoint> {
-        let representative = FieldElement::from_bytes(representative);
-        let (x, y) = map_fe_to_edwards(&representative);
-        let point = EdwardsPoint {
-            X: x,
-            Y: y,
-            Z: FieldElement::ONE,
-            T: &x * &y,
-        };
-        CtOption::new(point, Choice::from(1))
-    }
-
-    fn to_representative(point: &[u8; 32], _tweak: u8) -> CtOption<[u8; 32]> {
-        let pubkey = EdwardsPoint::mul_base_clamped(*point);
-        let v_in_sqrt = v_in_sqrt_pubkey_edwards(&pubkey);
-        point_to_representative(&MontgomeryPoint(*point), v_in_sqrt.into())
     }
 }
 
@@ -559,8 +525,6 @@ pub(crate) fn point_to_representative(
     point: &MontgomeryPoint,
     v_in_sqrt: bool,
 ) -> CtOption<[u8; 32]> {
-    let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
-
     // a := point
     let a = &FieldElement::from_bytes(&point.0);
     let a_neg = -a;
@@ -583,7 +547,9 @@ pub(crate) fn point_to_representative(
     let mut b = FieldElement::conditional_select(&r1, &r0, Choice::from(v_in_sqrt as u8));
 
     // If root > (p - 1) / 2, root := -root
-    let negate = divide_minus_p_1_2.ct_gt(&b);
+    // let negate = divide_minus_p_1_2.ct_gt(&b);
+    // let negate = divide_minus_p_1_2.mpn_sub_n(&b);
+    let negate = b.is_negative();
     FieldElement::conditional_negate(&mut b, negate);
 
     CtOption::new(b.as_bytes(), is_encodable)
@@ -659,8 +625,6 @@ pub(crate) fn v_in_sqrt(key_input: &[u8; 32]) -> Choice {
 /// Determines if `V <= (p - 1)/2` for an EdwardsPoint (e.g an x25519 public key)
 /// and returns a [`Choice`] indicating the result.
 pub(crate) fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
-    let divide_minus_p_1_2 = FieldElement::from_bytes(&DIVIDE_MINUS_P_1_2_BYTES);
-
     // sqrtMinusAPlus2 is sqrt(-(486662+2))
     let (_, sqrt_minus_a_plus_2) = FieldElement::sqrt_ratio_i(
         &(&MONTGOMERY_A_NEG - &(&FieldElement::ONE + &FieldElement::ONE)),
@@ -677,7 +641,9 @@ pub(crate) fn v_in_sqrt_pubkey_edwards(pubkey: &EdwardsPoint) -> Choice {
     let v = &(&t0 * &inv1) * &(&pubkey.Z * &sqrt_minus_a_plus_2);
 
     // is   v <= (q-1)/2  ?
-    divide_minus_p_1_2.ct_gt(&v)
+    // divide_minus_p_1_2.ct_gt(&v)
+    // divide_minus_p_1_2.mpn_sub_n(&v)
+    !v.is_negative()
 }
 
 // ============================================================================
@@ -779,8 +745,3 @@ mod randomness;
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
 mod subgroup;
-
-#[cfg(test)]
-#[cfg(feature = "elligator2")]
-#[cfg(feature = "digest")]
-mod legacy;
