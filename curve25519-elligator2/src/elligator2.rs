@@ -306,6 +306,29 @@ impl MontgomeryPoint {
         MontgomeryPoint(p.as_bytes())
     }
 
+    #[cfg(feature = "elligator2")]
+    /// Perform the Elligator2 mapping to a [`MontgomeryPoint`] using a u255 input.
+    ///
+    /// This is a CPace-specific variant intended for inputs obtained via
+    /// `decodeUCoordinate(..., 255)` (RFC 7748-style decoding), where only the
+    /// unused MSB is cleared (mask `0x7f`). Unlike [`MontgomeryPoint::map_to_point`],
+    /// this function does *not* assume the "least-square-root representative"
+    /// format used by RFC 9380 encodings.
+    ///
+    /// Input:
+    ///     * u -> 255-bit field element encoded in 32 bytes (little-endian),
+    ///            with the top bit masked off.
+    ///
+    /// Output:
+    ///     * P -> a point on the Montgomery elliptic curve (Curve25519).
+    pub fn map_to_point_u255(u: &[u8; 32]) -> MontgomeryPoint {
+        let mut masked = *u;
+        masked[31] &= 0x7f;
+        let r_0 = FieldElement::from_bytes(&masked);
+        let (p, _) = map_fe_to_montgomery(&r_0);
+        MontgomeryPoint(p.as_bytes())
+    }
+
     /// Maps a representative to a curve point.
     ///
     /// This function is the inverse of `to_representative`.
@@ -771,6 +794,10 @@ mod compatibility;
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
 mod rfc9380;
+
+#[cfg(test)]
+#[cfg(feature = "elligator2")]
+mod cpace_u255;
 
 #[cfg(test)]
 #[cfg(feature = "elligator2")]
